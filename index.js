@@ -10,105 +10,14 @@
 
 const express = require("express");
 const WebSocket = require("ws");
+const { create } = require("@alexanderolsen/libsamplerate-js");
+
 require("dotenv").config();
 
-const INTERVAL_MS = parseInt(process.env.INTERVAL_MS) || 20;
+const INTERVAL_MS = parseInt(process.env.INTERVAL_MS) || 19;
 
 // Initialize Express application
 const app = express();
-
-/**
- * Audio Processing Utilities
- */
-
-/**
- * Upsamples audio from 8kHz 16-bit mono to 24kHz 16-bit mono using linear interpolation.
- * More efficient than generic resampleAudio for this specific conversion.
- * 
- * @param {Buffer} audioBuffer - Input audio buffer (8kHz, 16-bit, mono)
- * @returns {Buffer} Upsampled audio buffer (24kHz, 16-bit, mono)
- */
-const upsample8kTo24k = (audioBuffer) => {
-  if (!audioBuffer || audioBuffer.length === 0) {
-    return Buffer.alloc(0);
-  }
-
-  // 24kHz / 8kHz = 3x upsampling factor
-  const upsamplingFactor = 3;
-  const bytesPerSample = 2;
-  const inputSampleCount = audioBuffer.length / bytesPerSample;
-  
-  if (inputSampleCount < 2) {
-    return audioBuffer;
-  }
-
-  const outputSampleCount = inputSampleCount * upsamplingFactor;
-  const outputBuffer = Buffer.alloc(outputSampleCount * bytesPerSample);
-
-  for (let i = 0; i < inputSampleCount - 1; i++) {
-    // Read current and next sample as 16-bit signed integers
-    const currentSample = audioBuffer.readInt16LE(i * bytesPerSample);
-    const nextSample = audioBuffer.readInt16LE((i + 1) * bytesPerSample);
-
-    // Generate 3 interpolated samples between current and next
-    for (let j = 0; j < upsamplingFactor; j++) {
-      const interpolationFactor = j / upsamplingFactor;
-      const interpolatedSample = Math.round(
-        currentSample + (nextSample - currentSample) * interpolationFactor
-      );
-
-      // Clamp to 16-bit range
-      const clampedSample = Math.max(-32768, Math.min(32767, interpolatedSample));
-
-      // Write to output buffer
-      const outputIndex = (i * upsamplingFactor + j) * bytesPerSample;
-      outputBuffer.writeInt16LE(clampedSample, outputIndex);
-    }
-  }
-
-  // Handle the last sample (repeat it for the remaining upsampled samples)
-  const lastSample = audioBuffer.readInt16LE((inputSampleCount - 1) * bytesPerSample);
-  for (let j = 0; j < upsamplingFactor; j++) {
-    const outputIndex = ((inputSampleCount - 1) * upsamplingFactor + j) * bytesPerSample;
-    outputBuffer.writeInt16LE(lastSample, outputIndex);
-  }
-
-  return outputBuffer;
-};
-
-/**
- * Downsamples audio from 24kHz 16-bit mono to 8kHz 16-bit mono using decimation.
- * More efficient than generic resampleAudio for this specific conversion.
- * 
- * @param {Buffer} audioBuffer - Input audio buffer (24kHz, 16-bit, mono)
- * @returns {Buffer} Downsampled audio buffer (8kHz, 16-bit, mono)
- */
-const downsample24kTo8k = (audioBuffer) => {
-  if (!audioBuffer || audioBuffer.length === 0) {
-    return Buffer.alloc(0);
-  }
-
-  // 24kHz / 8kHz = 3x downsampling factor
-  const downsamplingFactor = 3;
-  const bytesPerSample = 2;
-  const inputSampleCount = audioBuffer.length / bytesPerSample;
-  
-  if (inputSampleCount < downsamplingFactor) {
-    return audioBuffer;
-  }
-
-  const outputSampleCount = Math.floor(inputSampleCount / downsamplingFactor);
-  const outputBuffer = Buffer.alloc(outputSampleCount * bytesPerSample);
-
-  for (let i = 0; i < outputSampleCount; i++) {
-    // Take every 3rd sample (decimation)
-    const inputIndex = i * downsamplingFactor;
-    const sample = audioBuffer.readInt16LE(inputIndex * bytesPerSample);
-    outputBuffer.writeInt16LE(sample, i * bytesPerSample);
-  }
-
-  return outputBuffer;
-};
 
 /**
  * Creates and configures a WebSocket connection to OpenAI's real-time API.
@@ -138,36 +47,73 @@ const connectToOpenAI = () => {
  */
 const handleAudioStream = async (req, res) => {
   console.log("New audio stream received");
+  const sessionUuid = req.headers["x-uuid"];
+  console.log("Session UUID:", sessionUuid);
+
+  // Initialize audio resamplers for format conversion
+  const downsampler = await create(1, 24000, 8000); // 1 channel, 24kHz to 8kHz
+  const upsampler = await create(1, 8000, 24000); // 1 channel, 8kHz to 24kHz
+
+  let audioBuffer8k = [];
+  let outputBuffer = [];
 
   const ws = connectToOpenAI();
 
-  let inputAudioBuffer = Buffer.alloc(0);
-  let outputAudioBuffer = Buffer.alloc(0);
-  let buffer = Buffer.alloc(0);
+  /**
+   * Processes OpenAI audio chunks by downsampling and extracting frames.
+   * Converts 24kHz audio to 8kHz and extracts 20ms frames (160 samples).
+   *
+   * @param {Buffer} inputBuffer - Raw audio buffer from OpenAI
+   * @returns {Buffer[]} Array of 20ms audio frames
+   */
+  function processOpenAIAudioChunk(inputBuffer) {
+    // Convert Buffer to Int16Array for processing
+    const inputSamples = new Int16Array(
+      inputBuffer.buffer,
+      inputBuffer.byteOffset,
+      inputBuffer.length / 2
+    );
 
-  const inputAudioBufferInterval = setInterval(() => {
-    if (inputAudioBuffer.length >= 4800 && ws.readyState === WebSocket.OPEN) {
-      // Send only one packet of 4800 bytes
-      const chunk = inputAudioBuffer.slice(0, 4800);
-      ws.send(
-        JSON.stringify({
-          type: "input_audio_buffer.append",
-          audio: chunk.toString("base64"),
-        })
-      );
-      
-      inputAudioBuffer = inputAudioBuffer.slice(4800);      
+    // Downsample from 24kHz to 8kHz
+    const downsampledSamples = downsampler.full(inputSamples);
+
+    // Accumulate samples in buffer
+    audioBuffer8k = audioBuffer8k.concat(Array.from(downsampledSamples));
+
+    // Extract 20ms frames (160 samples = 320 bytes)
+    const audioFrames = [];
+    while (audioBuffer8k.length >= 160) {
+      const frame = audioBuffer8k.slice(0, 160);
+      audioBuffer8k = audioBuffer8k.slice(160);
+
+      // Convert to PCM16LE Buffer (320 bytes)
+      audioFrames.push(Buffer.from(Int16Array.from(frame).buffer));
     }
-  }, 100);
 
-  const outputAudioBufferInterval = setInterval(() => {
-    if (outputAudioBuffer.length >= 320) {
-      // Send only one packet of 320 bytes (s16le format)
-      const chunk = outputAudioBuffer.slice(0, 320);
+    return audioFrames;
+  }
+
+  /**
+   * Converts 8kHz audio to 24kHz for sending to OpenAI API.
+   *
+   * @param {Buffer} inputBuffer - 8kHz audio buffer
+   * @returns {Buffer} 24kHz audio buffer
+   */
+  function convert8kTo24k(inputBuffer) {
+    const inputSamples = new Int16Array(
+      inputBuffer.buffer,
+      inputBuffer.byteOffset,
+      inputBuffer.length / 2
+    );
+    const upsampledSamples = upsampler.full(inputSamples);
+    return Buffer.from(Int16Array.from(upsampledSamples).buffer);
+  }
+
+  const interval = setInterval(() => {
+    if (outputBuffer.length > 0) {
+      // Estrai il primo elemento dal buffer
+      const chunk = outputBuffer.shift();
       res.write(chunk);
-      
-      // Remove the sent chunk from buffer
-      outputAudioBuffer = outputAudioBuffer.slice(320);
     }
   }, INTERVAL_MS);
 
@@ -207,10 +153,9 @@ const handleAudioStream = async (req, res) => {
           break;
 
         case "response.audio.delta":
-          const decoded = Buffer.from(message.delta, "base64");
-          console.log("Received audio chunk from OpenAI", decoded.length);
-          const resampled = downsample24kTo8k(decoded);
-          outputAudioBuffer = Buffer.concat([outputAudioBuffer, resampled]);
+          const audioChunk = Buffer.from(message.delta, "base64");
+          const audioFrames = processOpenAIAudioChunk(audioChunk);
+          outputBuffer = outputBuffer.concat(audioFrames);
           break;
 
         case "response.audio.done":
@@ -227,8 +172,7 @@ const handleAudioStream = async (req, res) => {
 
         case "input_audio_buffer.speech_started":
           console.log("Audio streaming started");
-          outputAudioBuffer = Buffer.alloc(0);
-          buffer = Buffer.alloc(0);
+          outputBuffer = [];
           break;
 
         default:
@@ -242,31 +186,46 @@ const handleAudioStream = async (req, res) => {
 
   ws.on("close", () => {
     console.log("WebSocket connection closed");
-    clearInterval(inputAudioBufferInterval);
-    clearInterval(outputAudioBufferInterval);
-    res.end();
+    cleanup();
   });
 
   ws.on("error", (err) => {
     console.error("WebSocket error:", err);
-    clearInterval(inputAudioBufferInterval);
-    clearInterval(outputAudioBufferInterval);
-    res.end();
+    cleanup();
   });
 
-      // Handle incoming audio data
-    req.on("data", (chunk) => {
-      const resampled = upsample8kTo24k(chunk);
-      inputAudioBuffer = Buffer.concat([inputAudioBuffer, resampled]);
-    });
+  /**
+   * Cleans up resources and ends the response.
+   */
+  function cleanup() {
+    clearInterval(interval);
+    downsampler.destroy();
+    upsampler.destroy();
+    res.end();
+  }
+
+  // Handle incoming audio data
+  req.on("data", (audioChunk) => {
+    const upsampledAudio = convert8kTo24k(audioChunk);
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: "input_audio_buffer.append",
+          audio: upsampledAudio.toString("base64"),
+        })
+      );
+    }
+  });
 
   req.on("end", () => {
     console.log("Request stream ended");
+    cleanup();
     ws.close();
   });
 
   req.on("error", (err) => {
     console.error("Request error:", err);
+    cleanup();
     ws.close();
   });
 };
