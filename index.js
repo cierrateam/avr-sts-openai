@@ -14,8 +14,6 @@ const { create } = require("@alexanderolsen/libsamplerate-js");
 
 require("dotenv").config();
 
-const INTERVAL_MS = parseInt(process.env.INTERVAL_MS) || 19;
-
 // Initialize Express application
 const app = express();
 
@@ -55,7 +53,6 @@ const handleAudioStream = async (req, res) => {
   const upsampler = await create(1, 8000, 24000); // 1 channel, 8kHz to 24kHz
 
   let audioBuffer8k = [];
-  let outputBuffer = [];
 
   const ws = connectToOpenAI();
 
@@ -109,14 +106,6 @@ const handleAudioStream = async (req, res) => {
     return Buffer.from(Int16Array.from(upsampledSamples).buffer);
   }
 
-  const interval = setInterval(() => {
-    if (outputBuffer.length > 0) {
-      // Estrai il primo elemento dal buffer
-      const chunk = outputBuffer.shift();
-      res.write(chunk);
-    }
-  }, INTERVAL_MS);
-
   // Configure WebSocket event handlers
   ws.on("open", () => {
     console.log("WebSocket connected to OpenAI");
@@ -155,7 +144,9 @@ const handleAudioStream = async (req, res) => {
         case "response.audio.delta":
           const audioChunk = Buffer.from(message.delta, "base64");
           const audioFrames = processOpenAIAudioChunk(audioChunk);
-          outputBuffer = outputBuffer.concat(audioFrames);
+          audioFrames.forEach((frame) => {
+            res.write(frame);
+          });
           break;
 
         case "response.audio.done":
@@ -172,7 +163,6 @@ const handleAudioStream = async (req, res) => {
 
         case "input_audio_buffer.speech_started":
           console.log("Audio streaming started");
-          outputBuffer = [];
           break;
 
         default:
@@ -198,7 +188,6 @@ const handleAudioStream = async (req, res) => {
    * Cleans up resources and ends the response.
    */
   function cleanup() {
-    clearInterval(interval);
     downsampler.destroy();
     upsampler.destroy();
     res.end();
