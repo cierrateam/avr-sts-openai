@@ -11,6 +11,7 @@
 const express = require("express");
 const WebSocket = require("ws");
 const { create } = require("@alexanderolsen/libsamplerate-js");
+const { loadTools, getToolHandler } = require("./loadTools");
 
 require("dotenv").config();
 
@@ -111,23 +112,33 @@ const handleAudioStream = async (req, res) => {
     console.log("WebSocket connected to OpenAI");
 
     // Initialize session with audio format specifications
-    ws.send(
-      JSON.stringify({
-        type: "session.update",
-        session: {
-          instructions:
-            process.env.OPENAI_INSTRUCTIONS ||
-            "You are a helpful assistant that can answer questions and help with tasks.",
-          input_audio_format: "pcm16",
-          output_audio_format: "pcm16",
-          temperature: +process.env.OPENAI_TEMPERATURE || 0.8,
-          max_response_output_tokens: +process.env.OPENAI_MAX_TOKENS || "inf",
-        },
-      })
-    );
+    const obj = {
+      type: "session.update",
+      session: {
+        instructions:
+          process.env.OPENAI_INSTRUCTIONS ||
+          "You are a helpful assistant that can answer questions and help with tasks.",
+        input_audio_format: "pcm16",
+        output_audio_format: "pcm16",
+        temperature: +process.env.OPENAI_TEMPERATURE || 0.8,
+        max_response_output_tokens: +process.env.OPENAI_MAX_TOKENS || "inf",
+      },
+    };
+
+    // Load available tools for OpenAI
+    try {
+      obj.session.tools = loadTools();
+      console.log(`Loaded ${obj.session.tools.length} tools for OpenAI`);
+    } catch (error) {
+      console.error(`Error loading tools for OpenAI: ${error.message}`);
+    }
+
+    console.log(obj.session);
+
+    ws.send(JSON.stringify(obj));
   });
 
-  ws.on("message", (data) => {
+  ws.on("message", async (data) => {
     try {
       const message = JSON.parse(data);
 
@@ -151,6 +162,37 @@ const handleAudioStream = async (req, res) => {
 
         case "response.audio.done":
           console.log("Audio streaming completed");
+          break;
+
+        case "response.function_call_arguments.done":
+          console.log("Function call arguments streaming completed", message);
+          // Get the appropriate handler for the tool
+          const handler = getToolHandler(message.name);
+          if (!handler) {
+            console.error(`No handler found for tool: ${message.name}`);
+            return;
+          }
+
+          try {
+            // Execute the tool handler with the provided arguments
+            const content = await handler(
+              sessionUuid,
+              JSON.parse(message.arguments)
+            );
+            console.log("Tool response:", content);
+            ws.send(
+              JSON.stringify({
+                type: "response.create",
+                response: {
+                  instructions: content,
+                },
+              })
+            );
+          } catch (error) {
+            // Handle errors during tool execution
+            console.error(`Error executing tool ${message.name}:`, error);
+            return;
+          }
           break;
 
         case "response.audio_transcript.delta":
