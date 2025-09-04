@@ -11,10 +11,9 @@
 const express = require("express");
 const WebSocket = require("ws");
 const { create } = require("@alexanderolsen/libsamplerate-js");
+const { loadTools, getToolHandler } = require("./loadTools");
 
 require("dotenv").config();
-
-const INTERVAL_MS = parseInt(process.env.INTERVAL_MS) || 19;
 
 // Initialize Express application
 const app = express();
@@ -55,7 +54,6 @@ const handleAudioStream = async (req, res) => {
   const upsampler = await create(1, 8000, 24000); // 1 channel, 8kHz to 24kHz
 
   let audioBuffer8k = [];
-  let outputBuffer = [];
 
   const ws = connectToOpenAI();
 
@@ -109,36 +107,38 @@ const handleAudioStream = async (req, res) => {
     return Buffer.from(Int16Array.from(upsampledSamples).buffer);
   }
 
-  const interval = setInterval(() => {
-    if (outputBuffer.length > 0) {
-      // Estrai il primo elemento dal buffer
-      const chunk = outputBuffer.shift();
-      res.write(chunk);
-    }
-  }, INTERVAL_MS);
-
   // Configure WebSocket event handlers
   ws.on("open", () => {
     console.log("WebSocket connected to OpenAI");
 
     // Initialize session with audio format specifications
-    ws.send(
-      JSON.stringify({
-        type: "session.update",
-        session: {
-          instructions:
-            process.env.OPENAI_INSTRUCTIONS ||
-            "You are a helpful assistant that can answer questions and help with tasks.",
-          input_audio_format: "pcm16",
-          output_audio_format: "pcm16",
-          temperature: +process.env.OPENAI_TEMPERATURE || 0.8,
-          max_response_output_tokens: +process.env.OPENAI_MAX_TOKENS || "inf",
-        },
-      })
-    );
+    const obj = {
+      type: "session.update",
+      session: {
+        instructions:
+          process.env.OPENAI_INSTRUCTIONS ||
+          "You are a helpful assistant that can answer questions and help with tasks.",
+        input_audio_format: "pcm16",
+        output_audio_format: "pcm16",
+        temperature: +process.env.OPENAI_TEMPERATURE || 0.8,
+        max_response_output_tokens: +process.env.OPENAI_MAX_TOKENS || "inf",
+      },
+    };
+
+    // Load available tools for OpenAI
+    try {
+      obj.session.tools = loadTools();
+      console.log(`Loaded ${obj.session.tools.length} tools for OpenAI`);
+    } catch (error) {
+      console.error(`Error loading tools for OpenAI: ${error.message}`);
+    }
+
+    console.log(obj.session);
+
+    ws.send(JSON.stringify(obj));
   });
 
-  ws.on("message", (data) => {
+  ws.on("message", async (data) => {
     try {
       const message = JSON.parse(data);
 
@@ -155,11 +155,44 @@ const handleAudioStream = async (req, res) => {
         case "response.audio.delta":
           const audioChunk = Buffer.from(message.delta, "base64");
           const audioFrames = processOpenAIAudioChunk(audioChunk);
-          outputBuffer = outputBuffer.concat(audioFrames);
+          audioFrames.forEach((frame) => {
+            res.write(frame);
+          });
           break;
 
         case "response.audio.done":
           console.log("Audio streaming completed");
+          break;
+
+        case "response.function_call_arguments.done":
+          console.log("Function call arguments streaming completed", message);
+          // Get the appropriate handler for the tool
+          const handler = getToolHandler(message.name);
+          if (!handler) {
+            console.error(`No handler found for tool: ${message.name}`);
+            return;
+          }
+
+          try {
+            // Execute the tool handler with the provided arguments
+            const content = await handler(
+              sessionUuid,
+              JSON.parse(message.arguments)
+            );
+            console.log("Tool response:", content);
+            ws.send(
+              JSON.stringify({
+                type: "response.create",
+                response: {
+                  instructions: content,
+                },
+              })
+            );
+          } catch (error) {
+            // Handle errors during tool execution
+            console.error(`Error executing tool ${message.name}:`, error);
+            return;
+          }
           break;
 
         case "response.audio_transcript.delta":
@@ -172,7 +205,6 @@ const handleAudioStream = async (req, res) => {
 
         case "input_audio_buffer.speech_started":
           console.log("Audio streaming started");
-          outputBuffer = [];
           break;
 
         default:
@@ -198,7 +230,6 @@ const handleAudioStream = async (req, res) => {
    * Cleans up resources and ends the response.
    */
   function cleanup() {
-    clearInterval(interval);
     downsampler.destroy();
     upsampler.destroy();
     res.end();
