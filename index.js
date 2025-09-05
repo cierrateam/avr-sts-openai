@@ -1,22 +1,24 @@
 /**
  * index.js
- * Entry point for the OpenAI Speech-to-Speech streaming application.
+ * Entry point for the OpenAI Speech-to-Speech streaming WebSocket server.
  * This server handles real-time audio streaming between clients and OpenAI's API,
  * performing necessary audio format conversions and WebSocket communication.
+ *
+ * Client Protocol:
+ * - Send {"type": "init", "uuid": "uuid"} to initialize session
+ * - Send {"type": "audio", "audio": "base64_encoded_audio"} to stream audio
+ * - Receive {"type": "audio", "audio": "base64_encoded_audio"} for responses
+ * - Receive {"type": "error", "message": "error_message"} for errors
  *
  * @author Agent Voice Response <info@agentvoiceresponse.com>
  * @see https://www.agentvoiceresponse.com
  */
 
-const express = require("express");
 const WebSocket = require("ws");
 const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler } = require("./loadTools");
 
 require("dotenv").config();
-
-// Initialize Express application
-const app = express();
 
 /**
  * Creates and configures a WebSocket connection to OpenAI's real-time API.
@@ -37,25 +39,37 @@ const connectToOpenAI = () => {
  * Stream Processing
  */
 
+// Global audio resamplers - created once and shared across all connections
+let globalDownsampler = null;
+let globalUpsampler = null;
+
 /**
- * Handles incoming client audio stream and manages communication with OpenAI's API.
+ * Initializes global audio resamplers for format conversion.
+ * Called once at server startup.
+ */
+const initializeResamplers = async () => {
+  try {
+    globalDownsampler = await create(1, 24000, 8000); // 1 channel, 24kHz to 8kHz
+    globalUpsampler = await create(1, 8000, 24000); // 1 channel, 8kHz to 24kHz
+    console.log("Global audio resamplers initialized");
+  } catch (error) {
+    console.error("Error initializing resamplers:", error);
+    process.exit(1);
+  }
+};
+
+/**
+ * Handles incoming client WebSocket connection and manages communication with OpenAI's API.
  * Implements buffering for audio chunks received before WebSocket connection is established.
  *
- * @param {Request} req - Express request object
- * @param {Response} res - Express response object
+ * @param {WebSocket} clientWs - Client WebSocket connection
  */
-const handleAudioStream = async (req, res) => {
-  console.log("New audio stream received");
-  const sessionUuid = req.headers["x-uuid"];
-  console.log("Session UUID:", sessionUuid);
-
-  // Initialize audio resamplers for format conversion
-  const downsampler = await create(1, 24000, 8000); // 1 channel, 24kHz to 8kHz
-  const upsampler = await create(1, 8000, 24000); // 1 channel, 8kHz to 24kHz
+const handleClientConnection = (clientWs) => {
+  console.log("New client WebSocket connection received");
+  let sessionUuid = null;
 
   let audioBuffer8k = [];
-
-  const ws = connectToOpenAI();
+  let ws = null;
 
   /**
    * Processes OpenAI audio chunks by downsampling and extracting frames.
@@ -72,8 +86,8 @@ const handleAudioStream = async (req, res) => {
       inputBuffer.length / 2
     );
 
-    // Downsample from 24kHz to 8kHz
-    const downsampledSamples = downsampler.full(inputSamples);
+    // Downsample from 24kHz to 8kHz using global downsampler
+    const downsampledSamples = globalDownsampler.full(inputSamples);
 
     // Accumulate samples in buffer
     audioBuffer8k = audioBuffer8k.concat(Array.from(downsampledSamples));
@@ -103,169 +117,251 @@ const handleAudioStream = async (req, res) => {
       inputBuffer.byteOffset,
       inputBuffer.length / 2
     );
-    const upsampledSamples = upsampler.full(inputSamples);
+    const upsampledSamples = globalUpsampler.full(inputSamples);
     return Buffer.from(Int16Array.from(upsampledSamples).buffer);
   }
 
-  // Configure WebSocket event handlers
-  ws.on("open", () => {
-    console.log("WebSocket connected to OpenAI");
-
-    // Initialize session with audio format specifications
-    const obj = {
-      type: "session.update",
-      session: {
-        instructions:
-          process.env.OPENAI_INSTRUCTIONS ||
-          "You are a helpful assistant that can answer questions and help with tasks.",
-        input_audio_format: "pcm16",
-        output_audio_format: "pcm16",
-        temperature: +process.env.OPENAI_TEMPERATURE || 0.8,
-        max_response_output_tokens: +process.env.OPENAI_MAX_TOKENS || "inf",
-      },
-    };
-
-    // Load available tools for OpenAI
-    try {
-      obj.session.tools = loadTools();
-      console.log(`Loaded ${obj.session.tools.length} tools for OpenAI`);
-    } catch (error) {
-      console.error(`Error loading tools for OpenAI: ${error.message}`);
-    }
-
-    console.log(obj.session);
-
-    ws.send(JSON.stringify(obj));
-  });
-
-  ws.on("message", async (data) => {
+  // Handle client WebSocket messages
+  clientWs.on("message", (data) => {
     try {
       const message = JSON.parse(data);
-
       switch (message.type) {
-        case "error":
-          console.error("OpenAI API error:", message.error);
-          res.status(500).json({ message: message.error.message });
+        case "init":
+          sessionUuid = message.uuid;
+          console.log("Session UUID:", sessionUuid);
+          // Initialize OpenAI connection when client is ready
+          initializeOpenAIConnection();
           break;
 
-        case "session.updated":
-          console.log("Session updated:", message);
-          break;
-
-        case "response.audio.delta":
-          const audioChunk = Buffer.from(message.delta, "base64");
-          const audioFrames = processOpenAIAudioChunk(audioChunk);
-          audioFrames.forEach((frame) => {
-            res.write(frame);
-          });
-          break;
-
-        case "response.audio.done":
-          console.log("Audio streaming completed");
-          break;
-
-        case "response.function_call_arguments.done":
-          console.log("Function call arguments streaming completed", message);
-          // Get the appropriate handler for the tool
-          const handler = getToolHandler(message.name);
-          if (!handler) {
-            console.error(`No handler found for tool: ${message.name}`);
-            return;
-          }
-
-          try {
-            // Execute the tool handler with the provided arguments
-            const content = await handler(
-              sessionUuid,
-              JSON.parse(message.arguments)
-            );
-            console.log("Tool response:", content);
+        case "audio":
+          // Handle audio data from client
+          if (message.audio && ws && ws.readyState === WebSocket.OPEN) {
+            const audioBuffer = Buffer.from(message.audio, "base64");
+            const upsampledAudio = convert8kTo24k(audioBuffer);
             ws.send(
               JSON.stringify({
-                type: "response.create",
-                response: {
-                  instructions: content,
-                },
+                type: "input_audio_buffer.append",
+                audio: upsampledAudio.toString("base64"),
               })
             );
-          } catch (error) {
-            // Handle errors during tool execution
-            console.error(`Error executing tool ${message.name}:`, error);
-            return;
           }
-          break;
-
-        case "response.audio_transcript.delta":
-          // console.log("Received transcript from OpenAI", message.delta);
-          break;
-
-        case "response.audio_transcript.done":
-          console.log("Final transcript:", message.transcript);
-          break;
-
-        case "input_audio_buffer.speech_started":
-          console.log("Audio streaming started");
           break;
 
         default:
-          console.log("Received message type:", message.type);
+          console.log("Unknown message type from client:", message.type);
           break;
       }
     } catch (error) {
-      console.error("Error processing WebSocket message:", error);
+      console.error("Error processing client message:", error);
     }
   });
 
-  ws.on("close", () => {
-    console.log("WebSocket connection closed");
+  // Initialize OpenAI WebSocket connection
+  const initializeOpenAIConnection = () => {
+    ws = connectToOpenAI();
+
+    // Configure WebSocket event handlers
+    ws.on("open", () => {
+      console.log("WebSocket connected to OpenAI");
+
+      // Initialize session with audio format specifications
+      const obj = {
+        type: "session.update",
+        session: {
+          instructions:
+            process.env.OPENAI_INSTRUCTIONS ||
+            "You are a helpful assistant that can answer questions and help with tasks.",
+          input_audio_format: "pcm16",
+          output_audio_format: "pcm16",
+          temperature: +process.env.OPENAI_TEMPERATURE || 0.8,
+          max_response_output_tokens: +process.env.OPENAI_MAX_TOKENS || "inf",
+        },
+      };
+
+      // Load available tools for OpenAI
+      try {
+        obj.session.tools = loadTools();
+        console.log(`Loaded ${obj.session.tools.length} tools for OpenAI`);
+      } catch (error) {
+        console.error(`Error loading tools for OpenAI: ${error.message}`);
+      }
+
+      console.log(obj.session);
+
+      ws.send(JSON.stringify(obj));
+    });
+
+    ws.on("message", async (data) => {
+      try {
+        const message = JSON.parse(data);
+
+        switch (message.type) {
+          case "error":
+            console.error("OpenAI API error:", message.error);
+            clientWs.send(
+              JSON.stringify({
+                type: "error",
+                message: message.error.message,
+              })
+            );
+            break;
+
+          case "session.updated":
+            console.log("Session updated:", message);
+            break;
+
+          case "response.audio.delta":
+            const audioChunk = Buffer.from(message.delta, "base64");
+            const audioFrames = processOpenAIAudioChunk(audioChunk);
+            // Send audio frames to client
+            audioFrames.forEach((frame) => {
+              clientWs.send(
+                JSON.stringify({
+                  type: "audio",
+                  audio: frame.toString("base64"),
+                })
+              );
+            });
+            break;
+
+          case "response.function_call_arguments.done":
+            console.log("Function call arguments streaming completed", message);
+            // Get the appropriate handler for the tool
+            const handler = getToolHandler(message.name);
+            if (!handler) {
+              console.error(`No handler found for tool: ${message.name}`);
+              return;
+            }
+
+            try {
+              // Execute the tool handler with the provided arguments
+              const content = await handler(
+                sessionUuid,
+                JSON.parse(message.arguments)
+              );
+              console.log("Tool response:", content);
+              ws.send(
+                JSON.stringify({
+                  type: "response.create",
+                  response: {
+                    instructions: content,
+                  },
+                })
+              );
+            } catch (error) {
+              // Handle errors during tool execution
+              console.error(`Error executing tool ${message.name}:`, error);
+              return;
+            }
+            break;
+
+          case "response.audio_transcript.done":
+            console.log("Final transcript:", message.transcript);
+            clientWs.send(
+              JSON.stringify({
+                type: "transcript",
+                role: "agent",
+                text: message.transcript,
+              })
+            );
+            break;
+
+          case "input_audio_buffer.speech_started":
+            console.log("Audio streaming started");
+            clientWs.send(JSON.stringify({ type: "interruption" }));
+            break;
+
+          default:
+            console.log("Received message type:", message.type);
+            break;
+        }
+      } catch (error) {
+        console.error("Error processing WebSocket message:", error);
+      }
+    });
+
+    ws.on("close", () => {
+      console.log("OpenAI WebSocket connection closed");
+      cleanup();
+    });
+
+    ws.on("error", (err) => {
+      console.error("OpenAI WebSocket error:", err);
+      cleanup();
+    });
+  };
+
+  // Handle client WebSocket close
+  clientWs.on("close", () => {
+    console.log("Client WebSocket connection closed");
     cleanup();
   });
 
-  ws.on("error", (err) => {
-    console.error("WebSocket error:", err);
+  clientWs.on("error", (err) => {
+    console.error("Client WebSocket error:", err);
     cleanup();
   });
 
   /**
-   * Cleans up resources and ends the response.
+   * Cleans up resources and closes connections.
    */
   function cleanup() {
-    downsampler.destroy();
-    upsampler.destroy();
-    res.end();
+    if (ws) ws.close();
+    if (clientWs) clientWs.close();
   }
-
-  // Handle incoming audio data
-  req.on("data", (audioChunk) => {
-    const upsampledAudio = convert8kTo24k(audioChunk);
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: "input_audio_buffer.append",
-          audio: upsampledAudio.toString("base64"),
-        })
-      );
-    }
-  });
-
-  req.on("end", () => {
-    console.log("Request stream ended");
-    cleanup();
-    ws.close();
-  });
-
-  req.on("error", (err) => {
-    console.error("Request error:", err);
-    cleanup();
-    ws.close();
-  });
 };
 
-// API Endpoints
-app.post("/speech-to-speech-stream", handleAudioStream);
+/**
+ * Global cleanup function to destroy resamplers when the process is terminated.
+ */
+const cleanupGlobalResources = () => {
+  console.log("Cleaning up global resources...");
+  if (globalDownsampler) {
+    globalDownsampler.destroy();
+    globalDownsampler = null;
+  }
+  if (globalUpsampler) {
+    globalUpsampler.destroy();
+    globalUpsampler = null;
+  }
+  console.log("Global resources cleaned up");
+};
 
-// Start server
-const PORT = process.env.PORT || 6030;
-app.listen(PORT, () => {
-  console.log(`OpenAI Speech-to-Speech server running on port ${PORT}`);
+// Handle process termination signals
+process.on("SIGINT", () => {
+  console.log("Received SIGINT, shutting down gracefully...");
+  cleanupGlobalResources();
+  process.exit(0);
 });
+
+process.on("SIGTERM", () => {
+  console.log("Received SIGTERM, shutting down gracefully...");
+  cleanupGlobalResources();
+  process.exit(0);
+});
+
+// Initialize resamplers and start server
+const startServer = async () => {
+  try {
+    await initializeResamplers();
+
+    // Create WebSocket server
+    const PORT = process.env.PORT || 6030;
+    const wss = new WebSocket.Server({ port: PORT });
+
+    wss.on("connection", (clientWs) => {
+      console.log("New client connected");
+      handleClientConnection(clientWs);
+    });
+
+    console.log(
+      `OpenAI Speech-to-Speech WebSocket server running on port ${PORT}`
+    );
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  }
+};
+
+// Start the server
+startServer();
