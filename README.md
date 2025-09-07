@@ -38,7 +38,12 @@ Create a `.env` file in the root of the project to store your API keys and confi
 OPENAI_API_KEY=your_openai_api_key
 PORT=6030
 OPENAI_MODEL=gpt-4o-realtime-preview  # Optional, defaults to gpt-4o-realtime-preview
-OPENAI_INSTRUCTIONS="You are a helpful assistant that can answer questions and help with tasks."  # Optional
+
+# Choose one of the following instruction loading methods:
+OPENAI_INSTRUCTIONS="You are a helpful assistant that can answer questions and help with tasks."  # Method 1: Direct variable
+#OPENAI_URL_INSTRUCTIONS="https://your-api.com/instructions"  # Method 2: Web service
+#OPENAI_FILE_INSTRUCTIONS="./instructions.txt"  # Method 3: Local file
+
 OPENAI_TEMPERATURE=0.8  # Optional, controls randomness (0.0-1.0), defaults to 0.8
 OPENAI_MAX_TOKENS=100  # Optional, controls response length, defaults to "inf"
 ```
@@ -104,8 +109,55 @@ You can customize the application behavior using the following environment varia
 - `PORT`: The port on which the server will listen (default: 6030)
 - `OPENAI_MODEL`: The OpenAI model to use (default: gpt-4o-realtime-preview)
 - `OPENAI_INSTRUCTIONS`: Custom instructions for the AI (optional)
+- `OPENAI_URL_INSTRUCTIONS`: URL to fetch instructions from a web service (optional)
+- `OPENAI_FILE_INSTRUCTIONS`: Path to a local file containing instructions (optional)
 - `OPENAI_TEMPERATURE`: Controls randomness in responses (0.0-1.0, default: 0.8)
 - `OPENAI_MAX_TOKENS`: Controls the maximum length of the response (default: "inf")
+
+### Instruction Loading Methods
+
+The application supports three different methods for loading AI instructions, with a specific priority order:
+
+#### 1. Environment Variable (Highest Priority)
+Set the `OPENAI_INSTRUCTIONS` environment variable with your custom instructions:
+
+```bash
+OPENAI_INSTRUCTIONS="You are a specialized customer service agent for a tech company. Always be polite and helpful."
+```
+
+#### 2. Web Service (Medium Priority)
+If no environment variable is set, the application can fetch instructions from a web service using the `OPENAI_URL_INSTRUCTIONS` environment variable:
+
+```bash
+OPENAI_URL_INSTRUCTIONS="https://your-api.com/instructions"
+```
+
+The web service should return a JSON response with a `system` field containing the instructions:
+```json
+{
+  "system": "You are a helpful assistant that provides technical support."
+}
+```
+
+The application will include the session UUID in the request headers as `X-AVR-UUID` for personalized instructions.
+
+#### 3. File (Lowest Priority)
+If neither environment variable nor web service is configured, the application can load instructions from a local file using the `OPENAI_FILE_INSTRUCTIONS` environment variable:
+
+```bash
+OPENAI_FILE_INSTRUCTIONS="./instructions.txt"
+```
+
+The file should contain plain text instructions that will be used as the system prompt.
+
+#### Priority Order
+The application checks for instructions in the following order:
+1. **Environment Variable** (`OPENAI_INSTRUCTIONS`) - Used if set
+2. **Web Service** (`OPENAI_URL_INSTRUCTIONS`) - Used if environment variable is not set
+3. **File** (`OPENAI_FILE_INSTRUCTIONS`) - Used if neither environment variable nor web service is configured
+4. **Default Instructions** - Fallback if none of the above are available
+
+This priority system allows for flexible configuration where you can override instructions at different levels depending on your deployment needs.
 
 ## Error Handling
 
