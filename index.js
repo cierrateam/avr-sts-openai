@@ -15,6 +15,8 @@
  */
 
 const WebSocket = require("ws");
+const axios = require("axios");
+const fs = require("fs").promises;
 const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler } = require("./loadTools");
 
@@ -161,22 +163,63 @@ const handleClientConnection = (clientWs) => {
     ws = connectToOpenAI();
 
     // Configure WebSocket event handlers
-    ws.on("open", () => {
+    ws.on("open", async () => {
       console.log("WebSocket connected to OpenAI");
 
       // Initialize session with audio format specifications
       const obj = {
         type: "session.update",
         session: {
-          instructions:
-            process.env.OPENAI_INSTRUCTIONS ||
-            "You are a helpful assistant that can answer questions and help with tasks.",
           input_audio_format: "pcm16",
           output_audio_format: "pcm16",
+          instructions:
+            "You are a helpful assistant that can answer questions and help with tasks.",
           temperature: +process.env.OPENAI_TEMPERATURE || 0.8,
           max_response_output_tokens: +process.env.OPENAI_MAX_TOKENS || "inf",
         },
       };
+
+      if (process.env.OPENAI_INSTRUCTIONS) {
+        console.log("Using OPENAI_INSTRUCTIONS from environment variable");
+        obj.session.instructions = process.env.OPENAI_INSTRUCTIONS;
+      } else if (process.env.OPENAI_URL_INSTRUCTIONS) {
+        console.log("Using OPENAI_URL_INSTRUCTIONS from environment variable");
+        try {
+          const response = await axios.get(
+            process.env.OPENAI_URL_INSTRUCTIONS,
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "X-AVR-UUID": sessionUuid,
+              },
+            }
+          );
+          const data = await response.data;
+          console.log(data);
+          obj.session.instructions = data.system;
+        } catch (error) {
+          console.error(
+            `Error loading instructions from ${process.env.OPENAI_URL_INSTRUCTIONS}: ${error.message}`
+          );
+        }
+      } else if (process.env.OPENAI_FILE_INSTRUCTIONS) {
+        console.log("Using OPENAI_FILE_INSTRUCTIONS from environment variable");
+        try {
+          const data = await fs.readFile(
+            process.env.OPENAI_FILE_INSTRUCTIONS,
+            "utf8"
+          );
+          obj.session.instructions = data;
+        } catch (error) {
+          console.error(
+            `Error loading instructions from ${process.env.OPENAI_FILE_INSTRUCTIONS}: ${error.message}`
+          );
+        }
+      } else {
+        console.log("Using default instructions");
+        obj.session.instructions =
+          "You are a helpful assistant that can answer questions and help with tasks.";
+      }
 
       // Load available tools for OpenAI
       try {
