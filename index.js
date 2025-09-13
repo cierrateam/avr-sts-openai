@@ -171,6 +171,9 @@ const handleClientConnection = (clientWs) => {
         type: "session.update",
         session: {
           input_audio_format: "pcm16",
+          input_audio_transcription: {
+            model: "whisper-1",
+          },
           output_audio_format: "pcm16",
           instructions:
             "You are a helpful assistant that can answer questions and help with tasks.",
@@ -299,19 +302,28 @@ const handleClientConnection = (clientWs) => {
             break;
 
           case "response.audio_transcript.done":
-            console.log("Final transcript:", message.transcript);
-            clientWs.send(
-              JSON.stringify({
-                type: "transcript",
-                role: "agent",
-                text: message.transcript,
-              })
-            );
+            const agentData = {
+              type: "transcript",
+              role: "agent",
+              text: message.transcript,
+            };
+            clientWs.send(JSON.stringify(agentData));
+            console.log("Agent transcript:", agentData);
             break;
 
           case "input_audio_buffer.speech_started":
             console.log("Audio streaming started");
             clientWs.send(JSON.stringify({ type: "interruption" }));
+            break;
+
+          case "conversation.item.input_audio_transcription.completed":
+            const userData = {
+              type: "transcript",
+              role: "user",
+              text: message.transcript,
+            };
+            clientWs.send(JSON.stringify(userData));
+            console.log("User transcript:", userData);
             break;
 
           default:
