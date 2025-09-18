@@ -6,8 +6,13 @@
   "scripts": {
     "start": "node .",
     "start:dev": "nodemon --inspect ./index.js",
-    "dc:build": "docker build --platform=linux/amd64 -t cierrateam/avr-sts-openai:latest -t cierrateam/avr-sts-openai:${npm_package_version} .",
-    "dc:push": "docker push cierrateam/avr-sts-openai:latest && docker push cierrateam/avr-sts-openai:${npm_package_version}"
+    "dc:build": "docker build --platform=linux/amd64 -t vittoriodev/avr-sts-openai:latest -t vittoriodev/avr-sts-openai:${npm_package_version} .",
+    "dc:build:local": "docker build -t vittoriodev/avr-sts-openai:latest -t vittoriodev/avr-sts-openai:${npm_package_version} .",
+    "dc:push": "docker push vittoriodev/avr-sts-openai:latest && docker push vittoriodev/avr-sts-openai:${npm_package_version}",
+    "dc:build:push": "npm run dc:build && npm run dc:push",
+    "dc:build:push:local": "npm run dc:build:local && npm run dc:push",
+    "dc:run": "docker run -p 6030:6030 --env-file .env vittoriodev/avr-sts-openai:latest",
+    "dc:run:dev": "docker run -p 6030:6030 --env-file .env vittoriodev/avr-sts-openai:latest"
   },
   "dependencies": {
     "@alexanderolsen/libsamplerate-js": "^2.1.2",
@@ -17,5 +22,5 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
-  },
+  }
 }
