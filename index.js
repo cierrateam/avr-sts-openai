@@ -113,19 +113,53 @@ const handleClientConnection = (clientWs) => {
     if (audioBuffer8k.length > 0) {
       console.log(`Flushing remaining ${audioBuffer8k.length} audio samples`);
       
-      // Pad with silence to make a complete frame if needed
-      const paddedFrame = new Int16Array(160);
-      paddedFrame.set(audioBuffer8k.slice(0, Math.min(audioBuffer8k.length, 160)));
+      // Process all remaining samples in complete frames
+      while (audioBuffer8k.length >= 160) {
+        const frame = audioBuffer8k.slice(0, 160);
+        audioBuffer8k = audioBuffer8k.slice(160);
+        
+        if (clientWs.readyState === WebSocket.OPEN) {
+          const frameBuffer = Buffer.from(Int16Array.from(frame).buffer);
+          clientWs.send(
+            JSON.stringify({
+              type: "audio",
+              audio: frameBuffer.toString("base64"),
+            })
+          );
+        }
+      }
       
-      // Send the final frame to client
-      if (clientWs.readyState === WebSocket.OPEN) {
-        const frameBuffer = Buffer.from(paddedFrame.buffer);
-        clientWs.send(
-          JSON.stringify({
-            type: "audio",
-            audio: frameBuffer.toString("base64"),
-          })
-        );
+      // If there are remaining samples, pad with silence and send
+      if (audioBuffer8k.length > 0) {
+        const paddedFrame = new Int16Array(160);
+        paddedFrame.set(audioBuffer8k.slice(0, Math.min(audioBuffer8k.length, 160)));
+        
+        if (clientWs.readyState === WebSocket.OPEN) {
+          const frameBuffer = Buffer.from(paddedFrame.buffer);
+          clientWs.send(
+            JSON.stringify({
+              type: "audio",
+              audio: frameBuffer.toString("base64"),
+            })
+          );
+        }
+      }
+      
+      // Add additional silence frames to ensure complete word delivery
+      // This helps prevent cut-off at sentence endings
+      const silenceFrames = 3; // Send 3 additional silence frames (60ms total)
+      for (let i = 0; i < silenceFrames; i++) {
+        const silenceFrame = new Int16Array(160); // All zeros = silence
+        
+        if (clientWs.readyState === WebSocket.OPEN) {
+          const frameBuffer = Buffer.from(silenceFrame.buffer);
+          clientWs.send(
+            JSON.stringify({
+              type: "audio",
+              audio: frameBuffer.toString("base64"),
+            })
+          );
+        }
       }
       
       // Clear the buffer
@@ -299,13 +333,19 @@ const handleClientConnection = (clientWs) => {
           case "response.audio.done":
             // Flush any remaining audio when response audio is complete
             console.log("Response audio completed, flushing buffer");
-            flushAudioBuffer();
+            // Add a small delay to ensure all audio has been processed
+            setTimeout(() => {
+              flushAudioBuffer();
+            }, 50); // 50ms delay
             break;
 
           case "response.done":
             // Also flush on overall response completion
             console.log("Response completed, ensuring buffer is flushed");
-            flushAudioBuffer();
+            // Add a small delay to ensure all audio has been processed
+            setTimeout(() => {
+              flushAudioBuffer();
+            }, 100); // 100ms delay for final flush
             break;
 
           case "response.function_call_arguments.done":
