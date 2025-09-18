@@ -1,20 +1,30 @@
 name: Build Docker Image
+
+# Add permissions for forked repositories
+permissions:
+  contents: read
+  packages: write
+
 on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
+
 jobs:
     build:
       name: push image to docker hub
       runs-on: ubuntu-latest
       steps:
-        - uses: actions/checkout@v2
+        - uses: actions/checkout@v4
         - name: login to docker hub
           id: docker-hub
           env:
             username: ${{secrets.DOCKERHUB_USERNAME}}
             password: ${{secrets.DOCKERHUB_PASSWORD}}
-          run: docker login -u $username -p $password 
+          run: echo $password | docker login -u $username --password-stdin 
         - name: get-npm-version
           id: package-version
           uses: martinbeentjes/npm-get-version-action@v1.3.1
