@@ -70,6 +70,7 @@ const handleClientConnection = (clientWs) => {
 
   let audioBuffer8k = [];
   let ws = null;
+  let isInitialized = false;
 
   /**
    * Processes OpenAI audio chunks by downsampling and extracting frames.
@@ -192,7 +193,17 @@ const handleClientConnection = (clientWs) => {
           sessionUuid = message.uuid;
           console.log("Session UUID:", sessionUuid);
           // Initialize OpenAI connection when client is ready
-          initializeOpenAIConnection();
+          if (!isInitialized) {
+            initializeOpenAIConnection();
+            isInitialized = true;
+          } else {
+            console.log("Session already initialized, reusing connection");
+            // Send ready signal to client
+            clientWs.send(JSON.stringify({
+              type: "ready",
+              message: "Session ready"
+            }));
+          }
           break;
 
         case "audio":
@@ -206,6 +217,29 @@ const handleClientConnection = (clientWs) => {
                 audio: upsampledAudio.toString("base64"),
               })
             );
+          } else if (message.audio && !ws) {
+            console.log("OpenAI connection not ready, buffering audio");
+            // Could implement audio buffering here if needed
+          }
+          break;
+
+        case "reset":
+          // Reset session for new conversation
+          console.log("Resetting session for new conversation");
+          audioBuffer8k = [];
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            // Send conversation reset to OpenAI
+            ws.send(JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "message",
+                role: "user",
+                content: [{
+                  type: "input_text",
+                  text: ""
+                }]
+              }
+            }));
           }
           break;
 
@@ -220,6 +254,11 @@ const handleClientConnection = (clientWs) => {
 
   // Initialize OpenAI WebSocket connection
   const initializeOpenAIConnection = () => {
+    // Close existing connection if any
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+    
     ws = connectToOpenAI();
 
     // Configure WebSocket event handlers
@@ -417,7 +456,8 @@ const handleClientConnection = (clientWs) => {
       console.log("OpenAI WebSocket connection closed");
       // Flush any remaining audio before closing
       flushAudioBuffer();
-      cleanup();
+      // Reset initialization state to allow reconnection
+      isInitialized = false;
     });
 
     ws.on("error", (err) => {
@@ -438,13 +478,26 @@ const handleClientConnection = (clientWs) => {
   });
 
   /**
-   * Cleans up resources and closes connections.
+   * Cleans up resources and resets session state.
    */
   function cleanup() {
     // Flush any remaining audio before cleanup
     flushAudioBuffer();
-    if (ws) ws.close();
-    if (clientWs) clientWs.close();
+    
+    // Reset session state but keep connections alive for reuse
+    audioBuffer8k = [];
+    sessionUuid = null;
+    isInitialized = false;
+    
+    // Only close OpenAI connection if it exists and is not already closed
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close();
+    }
+    
+    // Close client connection only if it's still open
+    if (clientWs && clientWs.readyState === WebSocket.OPEN) {
+      clientWs.close();
+    }
   }
 };
 
