@@ -7,8 +7,8 @@
   "scripts": {
     "start": "node .",
     "start:dev": "nodemon --inspect ./index.js",
-    "dc:build": "docker build --platform=linux/amd64 -t agentvoiceresponse/avr-sts-openai:latest -t agentvoiceresponse/avr-sts-openai:${npm_package_version} .",
-    "dc:push": "docker push agentvoiceresponse/avr-sts-openai:latest && docker push agentvoiceresponse/avr-sts-openai:${npm_package_version}"
+    "dc:build": "docker build --platform=linux/amd64 -t cierrateam/avr-sts-openai:latest -t cierrateam/avr-sts-openai:${npm_package_version} .",
+    "dc:push": "docker push cierrateam/avr-sts-openai:latest && docker push cierrateam/avr-sts-openai:${npm_package_version}"
   },
   "dependencies": {
     "@alexanderolsen/libsamplerate-js": "^2.1.2",

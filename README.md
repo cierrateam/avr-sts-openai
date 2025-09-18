@@ -1,8 +1,8 @@
 # Agent Voice Response - OpenAI Speech-to-Speech Integration
 
 [![Discord](https://img.shields.io/discord/1347239846632226998?label=Discord&logo=discord)](https://discord.gg/DFTU69Hg74)
-[![GitHub Repo stars](https://img.shields.io/github/stars/agentvoiceresponse/avr-sts-openai?style=social)](https://github.com/agentvoiceresponse/avr-sts-openai)
-[![Docker Pulls](https://img.shields.io/docker/pulls/agentvoiceresponse/avr-sts-openai?label=Docker%20Pulls&logo=docker)](https://hub.docker.com/r/agentvoiceresponse/avr-sts-openai)
+[![GitHub Repo stars](https://img.shields.io/github/stars/cierrateam/avr-sts-openai?style=social)](https://github.com/cierrateam/avr-sts-openai)
+[![Docker Pulls](https://img.shields.io/docker/pulls/cierrateam/avr-sts-openai?label=Docker%20Pulls&logo=docker)](https://hub.docker.com/r/cierrateam/avr-sts-openai)
 [![Ko-fi](https://img.shields.io/badge/Support%20us%20on-Ko--fi-ff5e5b.svg)](https://ko-fi.com/agentvoiceresponse)
 
 This repository showcases the integration between **Agent Voice Response** and **OpenAI's Real-time Speech-to-Speech API**. The application leverages OpenAI's powerful language model to process audio input from users, providing intelligent, context-aware responses in real-time audio format.
@@ -20,7 +20,7 @@ To set up and run this project, you will need:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/agentvoiceresponse/avr-sts-openai.git
+git clone https://github.com/cierrateam/avr-sts-openai.git
 cd avr-sts-openai
 ```
 
