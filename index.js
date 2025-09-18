@@ -108,6 +108,34 @@ const handleClientConnection = (clientWs) => {
   }
 
   /**
+   * Flushes any remaining audio samples in the buffer.
+   * This ensures all audio is sent to the client, preventing cut-off words.
+   */
+  function flushAudioBuffer() {
+    if (audioBuffer8k.length > 0) {
+      console.log(`Flushing remaining ${audioBuffer8k.length} audio samples`);
+      
+      // Pad with silence to make a complete frame if needed
+      const paddedFrame = new Int16Array(160);
+      paddedFrame.set(audioBuffer8k.slice(0, Math.min(audioBuffer8k.length, 160)));
+      
+      // Send the final frame to client
+      if (clientWs.readyState === WebSocket.OPEN) {
+        const frameBuffer = Buffer.from(paddedFrame.buffer);
+        clientWs.send(
+          JSON.stringify({
+            type: "audio",
+            audio: frameBuffer.toString("base64"),
+          })
+        );
+      }
+      
+      // Clear the buffer
+      audioBuffer8k = [];
+    }
+  }
+
+  /**
    * Converts 8kHz audio to 24kHz for sending to OpenAI API.
    *
    * @param {Buffer} inputBuffer - 8kHz audio buffer
@@ -270,6 +298,18 @@ const handleClientConnection = (clientWs) => {
             });
             break;
 
+          case "response.audio.done":
+            // Flush any remaining audio when response audio is complete
+            console.log("Response audio completed, flushing buffer");
+            flushAudioBuffer();
+            break;
+
+          case "response.done":
+            // Also flush on overall response completion
+            console.log("Response completed, ensuring buffer is flushed");
+            flushAudioBuffer();
+            break;
+
           case "response.function_call_arguments.done":
             console.log("Function call arguments streaming completed", message);
             // Get the appropriate handler for the tool
@@ -337,6 +377,8 @@ const handleClientConnection = (clientWs) => {
 
     ws.on("close", () => {
       console.log("OpenAI WebSocket connection closed");
+      // Flush any remaining audio before closing
+      flushAudioBuffer();
       cleanup();
     });
 
@@ -361,6 +403,8 @@ const handleClientConnection = (clientWs) => {
    * Cleans up resources and closes connections.
    */
   function cleanup() {
+    // Flush any remaining audio before cleanup
+    flushAudioBuffer();
     if (ws) ws.close();
     if (clientWs) clientWs.close();
   }
