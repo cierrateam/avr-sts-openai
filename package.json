@@ -7,7 +7,7 @@
     "start": "node .",
     "start:dev": "nodemon --inspect ./index.js",
     "dc:build": "docker build --platform=linux/amd64 -t vittoriodev/avr-sts-openai:latest -t vittoriodev/avr-sts-openai:${npm_package_version} .",
-    "dc:build:local": "docker build -t vittoriodev/avr-sts-openai:latest -t vittoriodev/avr-sts-openai:${npm_package_version} .",
+    "dc:build:local": "docker build --platform=linux/amd64 -t vittoriodev/avr-sts-openai:latest -t vittoriodev/avr-sts-openai:${npm_package_version} .",
     "dc:push": "docker push vittoriodev/avr-sts-openai:latest && docker push vittoriodev/avr-sts-openai:${npm_package_version}",
     "dc:build:push": "npm run dc:build && npm run dc:push",
     "dc:build:push:local": "npm run dc:build:local && npm run dc:push",

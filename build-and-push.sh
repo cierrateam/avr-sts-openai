@@ -27,7 +27,7 @@ if ! docker info | grep -q "Username:"; then
     echo ""
 fi
 
-echo "🔨 Building Docker image..."
+echo "🔨 Building Docker image for linux/amd64 platform..."
 docker build --platform=linux/amd64 \
     -t $IMAGE_NAME:latest \
     -t $IMAGE_NAME:$VERSION \
