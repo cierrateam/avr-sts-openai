@@ -10,8 +10,6 @@
  * - Receive {"type": "audio", "audio": "base64_encoded_audio"} for responses
  * - Receive {"type": "error", "message": "error_message"} for errors
  *
- * @author Agent Voice Response <info@agentvoiceresponse.com>
- * @see https://www.agentvoiceresponse.com
  */
 
 const WebSocket = require("ws");

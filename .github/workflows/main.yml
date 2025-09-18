@@ -5,7 +5,7 @@ on:
       - main
 jobs:
     build:
-      name: push docker image to docker hub
+      name: push image to docker hub
       runs-on: ubuntu-latest
       steps:
         - uses: actions/checkout@v2
