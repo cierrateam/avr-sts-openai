@@ -1,4 +1,4 @@
-# Agent Voice Response - OpenAI Speech-to-Speech Integration
+# CierraPhone - OpenAI Speech-to-Speech Integration
 
 [![Discord](https://img.shields.io/discord/1347239846632226998?label=Discord&logo=discord)](https://discord.gg/DFTU69Hg74)
 [![GitHub Repo stars](https://img.shields.io/github/stars/cierrateam/avr-sts-openai?style=social)](https://github.com/cierrateam/avr-sts-openai)
