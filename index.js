@@ -276,10 +276,11 @@ const handleClientConnection = (clientWs) => {
           input_audio_format: "pcm16",
           input_audio_transcription: {
             model: "whisper-1",
+            language: "de", // Set German as default language for transcription
           },
           output_audio_format: "pcm16",
           instructions:
-            "You are a helpful assistant that can answer questions and help with tasks.",
+            "You are a helpful assistant that can answer questions and help with tasks. Please respond in German unless specifically asked to use another language.",
           temperature: +process.env.OPENAI_TEMPERATURE || 0.8,
           max_response_output_tokens: +process.env.OPENAI_MAX_TOKENS || "inf",
         },
