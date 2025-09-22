@@ -148,7 +148,7 @@ const handleClientConnection = (clientWs) => {
       
       // Add additional silence frames to ensure complete word delivery
       // This helps prevent cut-off at sentence endings
-      const silenceFrames = 3; // Send 3 additional silence frames (60ms total)
+      const silenceFrames = 5; // Send 5 additional silence frames (100ms total)
       for (let i = 0; i < silenceFrames; i++) {
         const silenceFrame = new Int16Array(160); // All zeros = silence
         
@@ -163,9 +163,11 @@ const handleClientConnection = (clientWs) => {
         }
       }
       
-      // Clear the buffer
-      audioBuffer8k = [];
+      console.log("Audio buffer flushed and cleared");
     }
+    
+    // Always clear the buffer, even if it was empty
+    audioBuffer8k = [];
   }
 
   /**
@@ -226,6 +228,8 @@ const handleClientConnection = (clientWs) => {
         case "reset":
           // Reset session for new conversation
           console.log("Resetting session for new conversation");
+          // Flush any remaining audio before reset
+          flushAudioBuffer();
           audioBuffer8k = [];
           if (ws && ws.readyState === WebSocket.OPEN) {
             // Send conversation reset to OpenAI
@@ -360,31 +364,35 @@ const handleClientConnection = (clientWs) => {
             const audioFrames = processOpenAIAudioChunk(audioChunk);
             // Send audio frames to client
             audioFrames.forEach((frame) => {
-              clientWs.send(
-                JSON.stringify({
-                  type: "audio",
-                  audio: frame.toString("base64"),
-                })
-              );
+              if (clientWs.readyState === WebSocket.OPEN) {
+                clientWs.send(
+                  JSON.stringify({
+                    type: "audio",
+                    audio: frame.toString("base64"),
+                  })
+                );
+              }
             });
+            break;
+
+          case "response.audio_started":
+            // New response started, ensure buffer is clean
+            console.log("New audio response started, clearing buffer");
+            audioBuffer8k = [];
             break;
 
           case "response.audio.done":
             // Flush any remaining audio when response audio is complete
             console.log("Response audio completed, flushing buffer");
-            // Add a small delay to ensure all audio has been processed
-            setTimeout(() => {
-              flushAudioBuffer();
-            }, 50); // 50ms delay
+            // Immediate flush to ensure all audio is sent
+            flushAudioBuffer();
             break;
 
           case "response.done":
             // Also flush on overall response completion
             console.log("Response completed, ensuring buffer is flushed");
-            // Add a small delay to ensure all audio has been processed
-            setTimeout(() => {
-              flushAudioBuffer();
-            }, 100); // 100ms delay for final flush
+            // Immediate flush to ensure all audio is sent
+            flushAudioBuffer();
             break;
 
           case "response.function_call_arguments.done":
