@@ -13,12 +13,11 @@
  */
 
 const WebSocket = require("ws");
-const axios = require("axios");
 const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler } = require("./loadTools");
+const AgentApiClient = require("./apiClient");
 
 require("dotenv").config();
-const AGENT_API_BASE_URL = process.env.AGENT_API_BASE_URL;
 
 /**
  * Creates and configures a WebSocket connection to OpenAI's real-time API.
@@ -289,33 +288,27 @@ const handleClientConnection = (clientWs) => {
       // Load instructions from AGENT_ID endpoint
       if (process.env.AGENT_ID) {
         console.log(`Loading instructions for agent ID: ${process.env.AGENT_ID}`);
-        try {
-          if (!AGENT_API_BASE_URL) {
-            console.warn(
-              "AGENT_API_BASE_URL is not set. Skipping agent instructions fetch and using default instructions."
-            );
-          } else {
-            const baseUrl = AGENT_API_BASE_URL.replace(/\/$/, "");
-            const response = await axios.get(
-              `${baseUrl}/api/agents/${process.env.AGENT_ID}/system-instructions`,
-              {
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-AVR-UUID": sessionUuid,
-                },
-              }
-            );
-            const data = await response.data;
-            console.log("Loaded instructions from agent endpoint:", data);
-            obj.session.instructions = data.system || data.instructions || data;
-          }
-        } catch (error) {
-          console.error(
-            `Error loading instructions for agent ${process.env.AGENT_ID}: ${error.message}`
+        const apiClient = new AgentApiClient();
+        
+        if (!apiClient.isConfigured()) {
+          console.warn(
+            "AGENT_API_BASE_URL is not set. Skipping agent instructions fetch and using default instructions."
           );
-          console.log("Falling back to default instructions");
           obj.session.instructions =
             "You are a helpful assistant that can answer questions and help with tasks.";
+        } else {
+          try {
+            const data = await apiClient.getSystemInstructions(process.env.AGENT_ID, sessionUuid);
+            console.log("Loaded instructions from agent endpoint:", data);
+            obj.session.instructions = data.system || data.instructions || data;
+          } catch (error) {
+            console.error(
+              `Error loading instructions for agent ${process.env.AGENT_ID}: ${error.message}`
+            );
+            console.log("Falling back to default instructions");
+            obj.session.instructions =
+              "You are a helpful assistant that can answer questions and help with tasks.";
+          }
         }
       } else {
         console.log("No AGENT_ID provided, using default instructions");
