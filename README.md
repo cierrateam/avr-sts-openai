@@ -35,10 +35,8 @@ OPENAI_API_KEY=your_openai_api_key
 PORT=6030
 OPENAI_MODEL=gpt-4o-realtime-preview  # Optional, defaults to gpt-4o-realtime-preview
 
-# Choose one of the following instruction loading methods:
-OPENAI_INSTRUCTIONS="You are a helpful assistant that can answer questions and help with tasks."  # Method 1: Direct variable
-#OPENAI_URL_INSTRUCTIONS="https://your-api.com/instructions"  # Method 2: Web service
-#OPENAI_FILE_INSTRUCTIONS="./instructions.txt"  # Method 3: Local file
+# Agent configuration
+AGENT_ID=your_agent_id  # Required: Agent ID for loading instructions from the API
 
 OPENAI_TEMPERATURE=0.8  # Optional, controls randomness (0.0-1.0), defaults to 0.8
 OPENAI_MAX_TOKENS=100  # Optional, controls response length, defaults to "inf"
@@ -104,56 +102,40 @@ You can customize the application behavior using the following environment varia
 - `OPENAI_API_KEY`: Your OpenAI API key (required)
 - `PORT`: The port on which the server will listen (default: 6030)
 - `OPENAI_MODEL`: The OpenAI model to use (default: gpt-4o-realtime-preview)
-- `OPENAI_INSTRUCTIONS`: Custom instructions for the AI (optional)
-- `OPENAI_URL_INSTRUCTIONS`: URL to fetch instructions from a web service (optional)
-- `OPENAI_FILE_INSTRUCTIONS`: Path to a local file containing instructions (optional)
+- `AGENT_ID`: Agent ID for loading instructions from the API (required)
 - `OPENAI_TEMPERATURE`: Controls randomness in responses (0.0-1.0, default: 0.8)
 - `OPENAI_MAX_TOKENS`: Controls the maximum length of the response (default: "inf")
 
-### Instruction Loading Methods
+### Instruction Loading
 
-The application supports three different methods for loading AI instructions, with a specific priority order:
+The application loads AI instructions from a centralized API endpoint using the `AGENT_ID` environment variable.
 
-#### 1. Environment Variable (Highest Priority)
-Set the `OPENAI_INSTRUCTIONS` environment variable with your custom instructions:
-
-```bash
-OPENAI_INSTRUCTIONS="You are a specialized customer service agent for a tech company. Always be polite and helpful."
-```
-
-#### 2. Web Service (Medium Priority)
-If no environment variable is set, the application can fetch instructions from a web service using the `OPENAI_URL_INSTRUCTIONS` environment variable:
+#### Agent-Based Instruction Loading
+The application fetches instructions from the agent API endpoint:
 
 ```bash
-OPENAI_URL_INSTRUCTIONS="https://your-api.com/instructions"
+AGENT_ID=your_agent_id
 ```
 
-The web service should return a JSON response with a `system` field containing the instructions:
-```json
-{
-  "system": "You are a helpful assistant that provides technical support."
-}
+The application will make a GET request to:
 ```
+https://test-micha.pbx.cierra.ai/api/agents/{AGENT_ID}/system-instructions
+```
+
+The API should return a JSON response containing the instructions. The application will look for the instructions in the following fields (in order of priority):
+- `system` - Primary field for system instructions
+- `instructions` - Alternative field name
+- The response data itself (if it's a string)
 
 The application will include the session UUID in the request headers as `X-AVR-UUID` for personalized instructions.
 
-#### 3. File (Lowest Priority)
-If neither environment variable nor web service is configured, the application can load instructions from a local file using the `OPENAI_FILE_INSTRUCTIONS` environment variable:
-
-```bash
-OPENAI_FILE_INSTRUCTIONS="./instructions.txt"
+#### Fallback Behavior
+If the `AGENT_ID` is not provided or the API request fails, the application will fall back to default instructions:
+```
+"You are a helpful assistant that can answer questions and help with tasks."
 ```
 
-The file should contain plain text instructions that will be used as the system prompt.
-
-#### Priority Order
-The application checks for instructions in the following order:
-1. **Environment Variable** (`OPENAI_INSTRUCTIONS`) - Used if set
-2. **Web Service** (`OPENAI_URL_INSTRUCTIONS`) - Used if environment variable is not set
-3. **File** (`OPENAI_FILE_INSTRUCTIONS`) - Used if neither environment variable nor web service is configured
-4. **Default Instructions** - Fallback if none of the above are available
-
-This priority system allows for flexible configuration where you can override instructions at different levels depending on your deployment needs.
+This centralized approach ensures consistent instruction management across all agent deployments.
 
 ## Error Handling
 

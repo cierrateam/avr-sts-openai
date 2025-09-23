@@ -14,7 +14,6 @@
 
 const WebSocket = require("ws");
 const axios = require("axios");
-const fs = require("fs").promises;
 const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler } = require("./loadTools");
 
@@ -286,14 +285,12 @@ const handleClientConnection = (clientWs) => {
         },
       };
 
-      if (process.env.OPENAI_INSTRUCTIONS) {
-        console.log("Using OPENAI_INSTRUCTIONS from environment variable");
-        obj.session.instructions = process.env.OPENAI_INSTRUCTIONS;
-      } else if (process.env.OPENAI_URL_INSTRUCTIONS) {
-        console.log("Using OPENAI_URL_INSTRUCTIONS from environment variable");
+      // Load instructions from AGENT_ID endpoint
+      if (process.env.AGENT_ID) {
+        console.log(`Loading instructions for agent ID: ${process.env.AGENT_ID}`);
         try {
           const response = await axios.get(
-            process.env.OPENAI_URL_INSTRUCTIONS,
+            `https://test-micha.pbx.cierra.ai/api/agents/${process.env.AGENT_ID}/system-instructions`,
             {
               headers: {
                 "Content-Type": "application/json",
@@ -302,28 +299,18 @@ const handleClientConnection = (clientWs) => {
             }
           );
           const data = await response.data;
-          console.log(data);
-          obj.session.instructions = data.system;
+          console.log("Loaded instructions from agent endpoint:", data);
+          obj.session.instructions = data.system || data.instructions || data;
         } catch (error) {
           console.error(
-            `Error loading instructions from ${process.env.OPENAI_URL_INSTRUCTIONS}: ${error.message}`
+            `Error loading instructions for agent ${process.env.AGENT_ID}: ${error.message}`
           );
-        }
-      } else if (process.env.OPENAI_FILE_INSTRUCTIONS) {
-        console.log("Using OPENAI_FILE_INSTRUCTIONS from environment variable");
-        try {
-          const data = await fs.readFile(
-            process.env.OPENAI_FILE_INSTRUCTIONS,
-            "utf8"
-          );
-          obj.session.instructions = data;
-        } catch (error) {
-          console.error(
-            `Error loading instructions from ${process.env.OPENAI_FILE_INSTRUCTIONS}: ${error.message}`
-          );
+          console.log("Falling back to default instructions");
+          obj.session.instructions =
+            "You are a helpful assistant that can answer questions and help with tasks.";
         }
       } else {
-        console.log("Using default instructions");
+        console.log("No AGENT_ID provided, using default instructions");
         obj.session.instructions =
           "You are a helpful assistant that can answer questions and help with tasks.";
       }
