@@ -18,6 +18,7 @@ const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler } = require("./loadTools");
 
 require("dotenv").config();
+const AGENT_API_BASE_URL = process.env.AGENT_API_BASE_URL;
 
 /**
  * Creates and configures a WebSocket connection to OpenAI's real-time API.
@@ -289,18 +290,25 @@ const handleClientConnection = (clientWs) => {
       if (process.env.AGENT_ID) {
         console.log(`Loading instructions for agent ID: ${process.env.AGENT_ID}`);
         try {
-          const response = await axios.get(
-            `https://test-micha.pbx.cierra.ai/api/agents/${process.env.AGENT_ID}/system-instructions`,
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "X-AVR-UUID": sessionUuid,
-              },
-            }
-          );
-          const data = await response.data;
-          console.log("Loaded instructions from agent endpoint:", data);
-          obj.session.instructions = data.system || data.instructions || data;
+          if (!AGENT_API_BASE_URL) {
+            console.warn(
+              "AGENT_API_BASE_URL is not set. Skipping agent instructions fetch and using default instructions."
+            );
+          } else {
+            const baseUrl = AGENT_API_BASE_URL.replace(/\/$/, "");
+            const response = await axios.get(
+              `${baseUrl}/api/agents/${process.env.AGENT_ID}/system-instructions`,
+              {
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-AVR-UUID": sessionUuid,
+                },
+              }
+            );
+            const data = await response.data;
+            console.log("Loaded instructions from agent endpoint:", data);
+            obj.session.instructions = data.system || data.instructions || data;
+          }
         } catch (error) {
           console.error(
             `Error loading instructions for agent ${process.env.AGENT_ID}: ${error.message}`
