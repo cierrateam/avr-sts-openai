@@ -73,6 +73,7 @@ class AgentApiClient {
     return await this._makeRequest(`/api/agents/${agentId}/greeting`, sessionUuid);
   }
 
+
   /**
    * Fetches all agent configuration (instructions, tools, greeting)
    * @param {string} agentId - Agent ID

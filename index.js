@@ -16,6 +16,7 @@ const WebSocket = require("ws");
 const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
 const AgentApiClient = require("./apiClient");
+const axios = require("axios");
 
 require("dotenv").config();
 
@@ -43,6 +44,33 @@ let globalDownsampler = null;
 let globalUpsampler = null;
 
 /**
+ * Fetches caller information from PBX/AMI for a given session UUID
+ * @param {string} sessionUuid - Session UUID
+ * @returns {Promise<Object>} Caller information object
+ */
+const fetchCallerInfo = async (sessionUuid) => {
+  try {
+    const amiUrl = process.env.AMI_URL || "http://127.0.0.1:6006";
+    const response = await axios.post(`${amiUrl}/caller-info`, {
+      uuid: sessionUuid
+    });
+    
+    console.log("Caller info fetched from PBX:", response.data);
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching caller info from PBX:", error.message);
+    return {
+      phoneNumber: null,
+      callerName: null,
+      callerId: null,
+      channel: null,
+      context: null,
+      extension: null
+    };
+  }
+};
+
+/**
  * Initializes global audio resamplers for format conversion.
  * Called once at server startup.
  */
@@ -66,6 +94,7 @@ const initializeResamplers = async () => {
 const handleClientConnection = (clientWs) => {
   console.log("New client WebSocket connection received");
   let sessionUuid = null;
+  let callerInfo = null; // Store caller information for the session
 
   let audioBuffer8k = [];
   let ws = null;
@@ -187,13 +216,30 @@ const handleClientConnection = (clientWs) => {
   }
 
   // Handle client WebSocket messages
-  clientWs.on("message", (data) => {
+  clientWs.on("message", async (data) => {
     try {
       const message = JSON.parse(data);
       switch (message.type) {
         case "init":
           sessionUuid = message.uuid;
           console.log("Session UUID:", sessionUuid);
+          
+          // Fetch caller information from PBX/AMI
+          try {
+            callerInfo = await fetchCallerInfo(sessionUuid);
+            console.log("Caller information fetched from PBX:", callerInfo);
+          } catch (error) {
+            console.error("Error fetching caller info:", error);
+            callerInfo = {
+              phoneNumber: null,
+              callerName: null,
+              callerId: null,
+              channel: null,
+              context: null,
+              extension: null
+            };
+          }
+          
           // Initialize OpenAI connection when client is ready
           if (!isInitialized) {
             initializeOpenAIConnection();
@@ -449,10 +495,11 @@ const handleClientConnection = (clientWs) => {
             }
 
             try {
-              // Execute the tool handler with the provided arguments
+              // Execute the tool handler with the provided arguments and caller info
               const content = await handler(
                 sessionUuid,
-                JSON.parse(message.arguments)
+                JSON.parse(message.arguments),
+                callerInfo // Pass caller information to the tool handler
               );
               console.log("Tool response:", content);
               const responseText =
@@ -550,6 +597,7 @@ const handleClientConnection = (clientWs) => {
     // Reset session state but keep connections alive for reuse
     audioBuffer8k = [];
     sessionUuid = null;
+    callerInfo = null;
     isInitialized = false;
     
     // Only close OpenAI connection if it exists and is not already closed

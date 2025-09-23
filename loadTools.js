@@ -105,7 +105,7 @@ function getToolHandler(name) {
   if (apiToolHandlers.has(name)) {
     const handlerCfg = apiToolHandlers.get(name);
     // Generic API tool handler: always POST with provided headers
-    return async function apiToolHandler(sessionUuid, args) {
+    return async function apiToolHandler(sessionUuid, args, callerInfo = null) {
       const url = handlerCfg.url;
       let headersObj = { 'Content-Type': 'application/json' };
       if (Array.isArray(handlerCfg.headers)) {
@@ -122,7 +122,13 @@ function getToolHandler(name) {
         headersObj['X-AVR-UUID'] = sessionUuid;
       }
 
-      const response = await axios.post(url, args || {}, { headers: headersObj });
+      // Include caller information in the request payload
+      const payload = {
+        ...(args || {}),
+        callerInfo: callerInfo
+      };
+
+      const response = await axios.post(url, payload, { headers: headersObj });
       // Expecting a string or object that can be used as instructions
       return response.data;
     };
