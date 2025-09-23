@@ -22,6 +22,8 @@ COPY --chown=node:node avr_tools/avr_hangup.js avr_tools/avr_hangup.js
 
 COPY --chown=node:node loadTools.js loadTools.js
 
+COPY --chown=node:node apiClient.js apiClient.js
+
 COPY --chown=node:node index.js index.js
 
 USER node

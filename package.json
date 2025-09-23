@@ -1,6 +1,6 @@
 {
   "name": "avr-sts-openai",
-  "version": "1.7.8",
+  "version": "1.8.2",
   "description": "OpenAI Speech-to-Speech service for Agent Voice Response",
   "main": "index.js",
   "scripts": {

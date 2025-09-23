@@ -70,6 +70,7 @@ const handleClientConnection = (clientWs) => {
   let audioBuffer8k = [];
   let ws = null;
   let isInitialized = false;
+  let lastSentOpenAIResponsePayload = null;
 
   /**
    * Processes OpenAI audio chunks by downsampling and extracting frames.
@@ -346,18 +347,34 @@ const handleClientConnection = (clientWs) => {
       // If a greeting is configured on the API, say it as the first utterance
       try {
         if (process.env.AGENT_ID && apiClient.isConfigured()) {
+          console.log(`Fetching greeting for agent ${process.env.AGENT_ID}...`);
           const greetingData = await apiClient.getGreeting(process.env.AGENT_ID, sessionUuid);
+          console.log("Greeting data received:", greetingData);
+          
           const greetingText = (greetingData && (greetingData.greeting || greetingData.text || greetingData)) || "";
+          console.log("Extracted greeting text:", greetingText);
+          
           if (typeof greetingText === "string" && greetingText.trim().length > 0) {
-            ws.send(
-              JSON.stringify({
-                type: "response.create",
-                response: {
-                  instructions: greetingText.trim(),
-                },
-              })
-            );
+            const exactGreeting = greetingText.trim();
+            console.log(`Sending greeting as first utterance: "${exactGreeting}"`);
+            let greetingInstructions = `Du hast grade den Hörer abgenommen. Sage genau und ausschließlich folgendes, ohne Zusätze: \"${exactGreeting}\"`;
+            if (typeof greetingInstructions !== "string") {
+              greetingInstructions = String(greetingInstructions);
+            }
+            const greetingPayload = {
+              type: "response.create",
+              response: {
+                instructions: greetingInstructions,
+              },
+            };
+            console.log("OpenAI payload (greeting) instructions type:", typeof greetingPayload.response.instructions);
+            lastSentOpenAIResponsePayload = greetingPayload;
+            ws.send(JSON.stringify(greetingPayload));
+          } else {
+            console.log("No greeting text found or greeting is empty");
           }
+        } else {
+          console.log("No AGENT_ID or API not configured, skipping greeting");
         }
       } catch (error) {
         console.error("Failed to fetch or send greeting:", error.message);
@@ -371,6 +388,9 @@ const handleClientConnection = (clientWs) => {
         switch (message.type) {
           case "error":
             console.error("OpenAI API error:", message.error);
+          if (lastSentOpenAIResponsePayload) {
+            console.error("Last sent response.create payload:", lastSentOpenAIResponsePayload);
+          }
             clientWs.send(
               JSON.stringify({
                 type: "error",
@@ -435,14 +455,25 @@ const handleClientConnection = (clientWs) => {
                 JSON.parse(message.arguments)
               );
               console.log("Tool response:", content);
-              ws.send(
-                JSON.stringify({
-                  type: "response.create",
-                  response: {
-                    instructions: content,
-                  },
-                })
-              );
+              const responseText =
+                (content && typeof content === "object"
+                  ? (content.message || content.text || JSON.stringify(content))
+                  : String(content));
+              console.log(`Tool response for ${message.name}:`, content);
+              console.log(`Sending tool response text: "${responseText}"`);
+              let instructionsText = responseText;
+              if (typeof instructionsText !== "string") {
+                instructionsText = (instructionsText == null) ? "" : (typeof instructionsText.toString === "function" ? instructionsText.toString() : JSON.stringify(instructionsText));
+              }
+              const toolResponsePayload = {
+                type: "response.create",
+                response: {
+                  instructions: instructionsText,
+                },
+              };
+              console.log("OpenAI payload (tool) instructions type:", typeof toolResponsePayload.response.instructions);
+              lastSentOpenAIResponsePayload = toolResponsePayload;
+              ws.send(JSON.stringify(toolResponsePayload));
             } catch (error) {
               // Handle errors during tool execution
               console.error(`Error executing tool ${message.name}:`, error);
