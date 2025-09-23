@@ -14,7 +14,7 @@
 
 const WebSocket = require("ws");
 const { create } = require("@alexanderolsen/libsamplerate-js");
-const { loadTools, getToolHandler } = require("./loadTools");
+const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
 const AgentApiClient = require("./apiClient");
 
 require("dotenv").config();
@@ -267,6 +267,7 @@ const handleClientConnection = (clientWs) => {
     // Configure WebSocket event handlers
     ws.on("open", async () => {
       console.log("WebSocket connected to OpenAI");
+      const apiClient = new AgentApiClient();
 
       // Initialize session with audio format specifications
       const obj = {
@@ -288,7 +289,6 @@ const handleClientConnection = (clientWs) => {
       // Load instructions from AGENT_ID endpoint
       if (process.env.AGENT_ID) {
         console.log(`Loading instructions for agent ID: ${process.env.AGENT_ID}`);
-        const apiClient = new AgentApiClient();
         
         if (!apiClient.isConfigured()) {
           console.warn(
@@ -318,8 +318,23 @@ const handleClientConnection = (clientWs) => {
 
       // Load available tools for OpenAI
       try {
-        obj.session.tools = loadTools();
-        console.log(`Loaded ${obj.session.tools.length} tools for OpenAI`);
+        let apiTools = [];
+        if (process.env.AGENT_ID && apiClient.isConfigured()) {
+          try {
+            apiTools = await apiClient.getTools(process.env.AGENT_ID, sessionUuid);
+            if (!Array.isArray(apiTools)) {
+              apiTools = [];
+            }
+          } catch (error) {
+            console.error(`Error fetching API tools for agent ${process.env.AGENT_ID}: ${error.message}`);
+            apiTools = [];
+          }
+        }
+
+        // Register API tool handlers and build combined tool list
+        setApiTools(apiTools);
+        obj.session.tools = loadTools(apiTools);
+        console.log(`Loaded ${obj.session.tools.length} tools for OpenAI (including ${apiTools.length} from API)`);
       } catch (error) {
         console.error(`Error loading tools for OpenAI: ${error.message}`);
       }
