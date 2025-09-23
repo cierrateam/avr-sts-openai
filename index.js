@@ -342,6 +342,26 @@ const handleClientConnection = (clientWs) => {
       console.log(obj.session);
 
       ws.send(JSON.stringify(obj));
+
+      // If a greeting is configured on the API, say it as the first utterance
+      try {
+        if (process.env.AGENT_ID && apiClient.isConfigured()) {
+          const greetingData = await apiClient.getGreeting(process.env.AGENT_ID, sessionUuid);
+          const greetingText = (greetingData && (greetingData.greeting || greetingData.text || greetingData)) || "";
+          if (typeof greetingText === "string" && greetingText.trim().length > 0) {
+            ws.send(
+              JSON.stringify({
+                type: "response.create",
+                response: {
+                  instructions: greetingText.trim(),
+                },
+              })
+            );
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch or send greeting:", error.message);
+      }
     });
 
     ws.on("message", async (data) => {
