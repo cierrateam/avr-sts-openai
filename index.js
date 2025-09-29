@@ -216,7 +216,7 @@ const handleClientConnection = (clientWs) => {
   }
 
   // Handle client WebSocket messages
-  clientWs.on("message", async (data) => {
+  clientWs.on("message", (data) => {
     try {
       const message = JSON.parse(data);
       switch (message.type) {
@@ -224,21 +224,23 @@ const handleClientConnection = (clientWs) => {
           sessionUuid = message.uuid;
           console.log("Session UUID:", sessionUuid);
           
-          // Fetch caller information from PBX/AMI
-          try {
-            callerInfo = await fetchCallerInfo(sessionUuid);
-            console.log("Caller information fetched from PBX:", callerInfo);
-          } catch (error) {
-            console.error("Error fetching caller info:", error);
-            callerInfo = {
-              phoneNumber: null,
-              callerName: null,
-              callerId: null,
-              channel: null,
-              context: null,
-              extension: null
-            };
-          }
+          // Fetch caller information from PBX/AMI asynchronously
+          (async () => {
+            try {
+              callerInfo = await fetchCallerInfo(sessionUuid);
+              console.log("Caller information fetched from PBX:", callerInfo);
+            } catch (error) {
+              console.error("Error fetching caller info:", error);
+              callerInfo = {
+                phoneNumber: null,
+                callerName: null,
+                callerId: null,
+                channel: null,
+                context: null,
+                extension: null
+              };
+            }
+          })();
           
           // Initialize OpenAI connection when client is ready
           if (!isInitialized) {
