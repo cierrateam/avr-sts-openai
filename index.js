@@ -26,7 +26,7 @@ require("dotenv").config();
  * @returns {WebSocket} Configured WebSocket instance
  */
 const connectToOpenAI = () => {
-  const model = process.env.OPENAI_MODEL || "gpt-4o-realtime-preview";
+  const model = process.env.OPENAI_MODEL || "gpt-realtime";
   return new WebSocket(`wss://api.openai.com/v1/realtime?model=${model}`, {
     headers: {
       Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
