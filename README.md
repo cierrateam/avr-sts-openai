@@ -137,6 +137,37 @@ If the `AGENT_ID` is not provided or the API request fails, the application will
 
 This centralized approach ensures consistent instruction management across all agent deployments.
 
+## Call Summary Feature
+
+After each call ends, the application automatically sends a comprehensive call summary to your API endpoint. This includes:
+
+- **Complete transcript**: All user and agent messages with timestamps
+- **Caller information**: Phone number, name, and channel details
+- **Call metadata**: Start time, end time, and duration
+- **Session UUID**: For correlation with other systems
+
+### Configuration
+
+To enable call summaries, configure these environment variables:
+
+```bash
+AGENT_ID=your_agent_id                      # Required
+AGENT_API_BASE_URL=https://your-api.com    # Required
+```
+
+### API Endpoint
+
+The call summary is sent via POST to:
+```
+POST /api/agents/{AGENT_ID}/call-summary
+```
+
+See [CALL_SUMMARY_GUIDE.md](CALL_SUMMARY_GUIDE.md) for complete documentation including:
+- Call summary structure and data fields
+- API endpoint implementation examples
+- Use cases and integration patterns
+- Privacy and compliance considerations
+
 ## Error Handling
 
 The application includes comprehensive error handling for:

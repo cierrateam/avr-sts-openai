@@ -100,6 +100,10 @@ const handleClientConnection = (clientWs) => {
   let ws = null;
   let isInitialized = false;
   let lastSentOpenAIResponsePayload = null;
+  
+  // Track call metadata for summary
+  let callStartTime = null;
+  let transcripts = [];
 
   /**
    * Processes OpenAI audio chunks by downsampling and extracting frames.
@@ -223,6 +227,9 @@ const handleClientConnection = (clientWs) => {
         case "init":
           sessionUuid = message.uuid;
           console.log("Session UUID:", sessionUuid);
+          
+          // Track call start time
+          callStartTime = new Date();
           
           // Fetch caller information from PBX/AMI asynchronously
           (async () => {
@@ -538,6 +545,13 @@ const handleClientConnection = (clientWs) => {
             };
             clientWs.send(JSON.stringify(agentData));
             console.log("Agent transcript:", agentData);
+            
+            // Store transcript for call summary
+            transcripts.push({
+              role: "agent",
+              text: message.transcript,
+              timestamp: new Date().toISOString()
+            });
             break;
 
           case "input_audio_buffer.speech_started":
@@ -553,6 +567,13 @@ const handleClientConnection = (clientWs) => {
             };
             clientWs.send(JSON.stringify(userData));
             console.log("User transcript:", userData);
+            
+            // Store transcript for call summary
+            transcripts.push({
+              role: "user",
+              text: message.transcript,
+              timestamp: new Date().toISOString()
+            });
             break;
 
           default:
@@ -590,9 +611,65 @@ const handleClientConnection = (clientWs) => {
   });
 
   /**
+   * Sends call summary with transcript and metadata to the API
+   */
+  async function sendCallSummary() {
+    // Only send summary if we have the required data
+    if (!sessionUuid || !process.env.AGENT_ID) {
+      console.log("Skipping call summary: missing sessionUuid or AGENT_ID");
+      return;
+    }
+
+    const apiClient = new AgentApiClient();
+    if (!apiClient.isConfigured()) {
+      console.log("Skipping call summary: AGENT_API_BASE_URL not configured");
+      return;
+    }
+
+    try {
+      const callEndTime = new Date();
+      const durationMs = callStartTime ? callEndTime - callStartTime : 0;
+      const durationSeconds = Math.floor(durationMs / 1000);
+
+      const callSummary = {
+        sessionUuid: sessionUuid,
+        callerInfo: {
+          phoneNumber: callerInfo?.phoneNumber || callerInfo?.callerId || null,
+          callerName: callerInfo?.callerName || callerInfo?.caller_name || null,
+          channel: callerInfo?.channel || null,
+          context: callerInfo?.context || null,
+          extension: callerInfo?.extension || null
+        },
+        callMetadata: {
+          startTime: callStartTime ? callStartTime.toISOString() : null,
+          endTime: callEndTime.toISOString(),
+          durationSeconds: durationSeconds
+        },
+        transcripts: transcripts
+      };
+
+      console.log("Sending call summary to API:", {
+        sessionUuid,
+        transcriptCount: transcripts.length,
+        durationSeconds
+      });
+
+      await apiClient.sendCallSummary(process.env.AGENT_ID, sessionUuid, callSummary);
+      console.log("Call summary sent successfully");
+    } catch (error) {
+      console.error("Error sending call summary:", error.message);
+    }
+  }
+
+  /**
    * Cleans up resources and resets session state.
    */
   function cleanup() {
+    // Send call summary before cleanup
+    sendCallSummary().catch(err => {
+      console.error("Failed to send call summary during cleanup:", err);
+    });
+
     // Flush any remaining audio before cleanup
     flushAudioBuffer();
     
@@ -601,6 +678,8 @@ const handleClientConnection = (clientWs) => {
     sessionUuid = null;
     callerInfo = null;
     isInitialized = false;
+    callStartTime = null;
+    transcripts = [];
     
     // Only close OpenAI connection if it exists and is not already closed
     if (ws && ws.readyState === WebSocket.OPEN) {
