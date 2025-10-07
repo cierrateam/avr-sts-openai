@@ -98,6 +98,28 @@ class AgentApiClient {
       throw error;
     }
   }
+
+  /**
+   * Sends call summary with transcript and metadata to the API
+   * @param {string} agentId - Agent ID
+   * @param {string} sessionUuid - Session UUID
+   * @param {Object} callSummary - Call summary data including transcript and metadata
+   * @returns {Promise<Object>} API response
+   */
+  async sendCallSummary(agentId, sessionUuid, callSummary) {
+    if (!this.isConfigured()) {
+      throw new Error("AGENT_API_BASE_URL is not configured");
+    }
+
+    const url = `${this.baseUrl}/api/agents/${agentId}/call-summary`;
+    const response = await axios.post(url, callSummary, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-AVR-UUID": sessionUuid,
+      },
+    });
+    return response.data;
+  }
 }
 
 module.exports = AgentApiClient;
