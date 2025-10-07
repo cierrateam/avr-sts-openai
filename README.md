@@ -33,7 +33,7 @@ Create a `.env` file in the root of the project to store your API keys and confi
 ```bash
 OPENAI_API_KEY=your_openai_api_key
 PORT=6030
-OPENAI_MODEL=gpt-4o-realtime-preview  # Optional, defaults to gpt-4o-realtime-preview
+OPENAI_MODEL=gpt-realtime  # Optional, defaults to gpt-4o-realtime-preview
 
 # Agent configuration
 AGENT_ID=your_agent_id  # Required: Agent ID for loading instructions from the API
