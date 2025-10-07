@@ -223,7 +223,7 @@ const handleClientConnection = (clientWs) => {
   clientWs.on("message", (data) => {
     try {
       const message = JSON.parse(data);
-      console.log("Received message from client:", message.type);
+      console.log("Received message from client:", message);
       switch (message.type) {
         case "init":
           sessionUuid = message.uuid;
