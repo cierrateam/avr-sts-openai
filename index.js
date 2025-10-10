@@ -39,10 +39,6 @@ const connectToOpenAI = () => {
  * Stream Processing
  */
 
-// Global audio resamplers - created once and shared across all connections
-let globalDownsampler = null;
-let globalUpsampler = null;
-
 /**
  * Fetches caller information from PBX/AMI for a given session UUID
  * @param {string} sessionUuid - Session UUID
@@ -71,21 +67,6 @@ const fetchCallerInfo = async (sessionUuid) => {
 };
 
 /**
- * Initializes global audio resamplers for format conversion.
- * Called once at server startup.
- */
-const initializeResamplers = async () => {
-  try {
-    globalDownsampler = await create(1, 24000, 8000); // 1 channel, 24kHz to 8kHz
-    globalUpsampler = await create(1, 8000, 24000); // 1 channel, 8kHz to 24kHz
-    console.log("Global audio resamplers initialized");
-  } catch (error) {
-    console.error("Error initializing resamplers:", error);
-    process.exit(1);
-  }
-};
-
-/**
  * Handles incoming client WebSocket connection and manages communication with OpenAI's API.
  * Implements buffering for audio chunks received before WebSocket connection is established.
  *
@@ -95,6 +76,11 @@ const handleClientConnection = (clientWs) => {
   console.log("New client WebSocket connection received");
   let sessionUuid = null;
   let callerInfo = null; // Store caller information for the session
+
+  // Session-specific audio resamplers and tool handlers
+  let downsampler = null;
+  let upsampler = null;
+  let sessionToolHandlers = null;
 
   let audioBuffer8k = [];
   let ws = null;
@@ -120,8 +106,13 @@ const handleClientConnection = (clientWs) => {
       inputBuffer.length / 2
     );
 
-    // Downsample from 24kHz to 8kHz using global downsampler
-    const downsampledSamples = globalDownsampler.full(inputSamples);
+    if (!downsampler) {
+      console.warn("Downsampler not initialized; skipping audio chunk processing");
+      return [];
+    }
+
+    // Downsample from 24kHz to 8kHz using session-specific downsampler
+    const downsampledSamples = downsampler.full(inputSamples);
 
     // Accumulate samples in buffer
     audioBuffer8k = audioBuffer8k.concat(Array.from(downsampledSamples));
@@ -215,7 +206,12 @@ const handleClientConnection = (clientWs) => {
       inputBuffer.byteOffset,
       inputBuffer.length / 2
     );
-    const upsampledSamples = globalUpsampler.full(inputSamples);
+    if (!upsampler) {
+      console.warn("Upsampler not initialized; skipping audio conversion");
+      return Buffer.alloc(0);
+    }
+
+    const upsampledSamples = upsampler.full(inputSamples);
     return Buffer.from(Int16Array.from(upsampledSamples).buffer);
   }
 
@@ -325,6 +321,22 @@ const handleClientConnection = (clientWs) => {
       console.log("WebSocket connected to OpenAI");
       const apiClient = new AgentApiClient();
 
+      try {
+        downsampler = await create(1, 24000, 8000); // 1 channel, 24kHz to 8kHz
+        upsampler = await create(1, 8000, 24000); // 1 channel, 8kHz to 24kHz
+        console.log(`Session ${sessionUuid}: Audio resamplers initialized`);
+      } catch (error) {
+        console.error(`Session ${sessionUuid}: Failed to initialize audio resamplers`, error);
+        clientWs.send(
+          JSON.stringify({
+            type: "error",
+            message: "Failed to initialize audio processing pipeline. Please try again.",
+          })
+        );
+        cleanup();
+        return;
+      }
+
       // Initialize session with audio format specifications
       const obj = {
         type: "session.update",
@@ -396,7 +408,7 @@ const handleClientConnection = (clientWs) => {
         }
 
         // Register API tool handlers and build combined tool list
-        setApiTools(apiTools);
+        sessionToolHandlers = setApiTools(apiTools);
         obj.session.tools = loadTools(apiTools);
         console.log(`Loaded ${obj.session.tools.length} tools for OpenAI (including ${apiTools.length} from API)`);
       } catch (error) {
@@ -505,7 +517,7 @@ const handleClientConnection = (clientWs) => {
           case "response.function_call_arguments.done":
             console.log("Function call arguments streaming completed", message);
             // Get the appropriate handler for the tool
-            const handler = getToolHandler(message.name);
+            const handler = getToolHandler(message.name, sessionToolHandlers);
             if (!handler) {
               console.error(`No handler found for tool: ${message.name}`);
               return;
@@ -681,6 +693,18 @@ const handleClientConnection = (clientWs) => {
     // Flush any remaining audio before cleanup
     flushAudioBuffer();
     
+    // Destroy session-specific resamplers
+    if (downsampler) {
+      downsampler.destroy();
+      downsampler = null;
+    }
+    if (upsampler) {
+      upsampler.destroy();
+      upsampler = null;
+    }
+
+    sessionToolHandlers = null;
+
     // Reset session state but keep connections alive for reuse
     audioBuffer8k = [];
     sessionUuid = null;
@@ -701,57 +725,15 @@ const handleClientConnection = (clientWs) => {
   }
 };
 
-/**
- * Global cleanup function to destroy resamplers when the process is terminated.
- */
-const cleanupGlobalResources = () => {
-  console.log("Cleaning up global resources...");
-  if (globalDownsampler) {
-    globalDownsampler.destroy();
-    globalDownsampler = null;
-  }
-  if (globalUpsampler) {
-    globalUpsampler.destroy();
-    globalUpsampler = null;
-  }
-  console.log("Global resources cleaned up");
-};
+// Start server without global resampler initialization
+const PORT = process.env.PORT || 6030;
+const wss = new WebSocket.Server({ port: PORT });
 
-// Handle process termination signals
-process.on("SIGINT", () => {
-  console.log("Received SIGINT, shutting down gracefully...");
-  cleanupGlobalResources();
-  process.exit(0);
+wss.on("connection", (clientWs) => {
+  console.log("New client connected");
+  handleClientConnection(clientWs);
 });
 
-process.on("SIGTERM", () => {
-  console.log("Received SIGTERM, shutting down gracefully...");
-  cleanupGlobalResources();
-  process.exit(0);
-});
-
-// Initialize resamplers and start server
-const startServer = async () => {
-  try {
-    await initializeResamplers();
-
-    // Create WebSocket server
-    const PORT = process.env.PORT || 6030;
-    const wss = new WebSocket.Server({ port: PORT });
-
-    wss.on("connection", (clientWs) => {
-      console.log("New client connected");
-      handleClientConnection(clientWs);
-    });
-
-    console.log(
-      `OpenAI Speech-to-Speech WebSocket server running on port ${PORT}`
-    );
-  } catch (error) {
-    console.error("Failed to start server:", error);
-    process.exit(1);
-  }
-};
-
-// Start the server
-startServer();
+console.log(
+  `OpenAI Speech-to-Speech WebSocket server running on port ${PORT}`
+);

@@ -3,21 +3,17 @@ const path = require('path');
 const axios = require('axios');
 
 /**
- * In-memory registry for API-provided tool handlers
- */
-const apiToolHandlers = new Map();
-
-/**
  * Registers API-provided tools so their handlers can be resolved at runtime
  * @param {Array} apiTools - Array of tools from API (each contains a handler object)
  */
 function setApiTools(apiTools = []) {
-  apiToolHandlers.clear();
+  const sessionToolHandlers = new Map();
   apiTools.forEach(t => {
     if (t && t.name && t.handler && t.handler.url) {
-      apiToolHandlers.set(t.name, t.handler);
+      sessionToolHandlers.set(t.name, t.handler);
     }
   });
+  return sessionToolHandlers;
 }
 
 /**
@@ -85,7 +81,7 @@ function loadTools(apiTools = []) {
  * @returns {Function} Tool handler
  * @throws {Error} If the tool is not found
  */
-function getToolHandler(name) {
+function getToolHandler(name, sessionToolHandlers = null) {
   // Possible paths for the tool file
   const possiblePaths = [
     path.join(__dirname, 'avr_tools', `${name}.js`),  // First check in avr_tools
@@ -102,8 +98,8 @@ function getToolHandler(name) {
   }
 
   // Otherwise, check if it's an API-provided tool
-  if (apiToolHandlers.has(name)) {
-    const handlerCfg = apiToolHandlers.get(name);
+  if (sessionToolHandlers && sessionToolHandlers.has(name)) {
+    const handlerCfg = sessionToolHandlers.get(name);
     // Generic API tool handler: always POST with provided headers
     return async function apiToolHandler(sessionUuid, args, callerInfo = null) {
       const url = handlerCfg.url;
