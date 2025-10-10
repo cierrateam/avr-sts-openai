@@ -77,10 +77,12 @@ const handleClientConnection = (clientWs) => {
   let sessionUuid = null;
   let callerInfo = null; // Store caller information for the session
 
-  // Session-specific audio resamplers and tool handlers
+  // Session-specific audio resamplers, tool handlers, and interruption state
   let downsampler = null;
   let upsampler = null;
   let sessionToolHandlers = null;
+  let interruptsEnabled = false;
+  let isGreetingInProgress = false;
 
   let audioBuffer8k = [];
   let ws = null;
@@ -128,6 +130,13 @@ const handleClientConnection = (clientWs) => {
     }
 
     return audioFrames;
+  }
+
+  function enableInterruptions() {
+    if (!interruptsEnabled) {
+      console.log("Enabling interruptions for session", sessionUuid);
+      interruptsEnabled = true;
+    }
   }
 
   /**
@@ -321,6 +330,9 @@ const handleClientConnection = (clientWs) => {
       console.log("WebSocket connected to OpenAI");
       const apiClient = new AgentApiClient();
 
+      interruptsEnabled = false;
+      isGreetingInProgress = false;
+
       try {
         downsampler = await create(1, 24000, 8000); // 1 channel, 24kHz to 8kHz
         upsampler = await create(1, 8000, 24000); // 1 channel, 8kHz to 24kHz
@@ -353,7 +365,7 @@ const handleClientConnection = (clientWs) => {
             prefix_padding_ms: 300,
             silence_duration_ms: 500,
             create_response: true, // only in conversation mode
-            interrupt_response: true, // only in conversation mode
+            interrupt_response: false,
           },
           instructions:
             "You are a helpful assistant that can answer questions and help with tasks. Please respond in German unless specifically asked to use another language.",
@@ -444,15 +456,19 @@ const handleClientConnection = (clientWs) => {
             };
             console.log("OpenAI payload (greeting) instructions type:", typeof greetingPayload.response.instructions);
             lastSentOpenAIResponsePayload = greetingPayload;
+            isGreetingInProgress = true;
             ws.send(JSON.stringify(greetingPayload));
           } else {
             console.log("No greeting text found or greeting is empty");
+            enableInterruptions();
           }
         } else {
           console.log("No AGENT_ID or API not configured, skipping greeting");
+          enableInterruptions();
         }
       } catch (error) {
         console.error("Failed to fetch or send greeting:", error.message);
+        enableInterruptions();
       }
     });
 
@@ -504,15 +520,31 @@ const handleClientConnection = (clientWs) => {
             // Flush any remaining audio when response audio is complete
             console.log("Response audio completed, flushing buffer");
             // Immediate flush to ensure all audio is sent
-            flushAudioBuffer();
+          flushAudioBuffer();
+          if (isGreetingInProgress) {
+            isGreetingInProgress = false;
+            enableInterruptions();
+          }
             break;
 
           case "response.done":
             // Also flush on overall response completion
             console.log("Response completed, ensuring buffer is flushed");
             // Immediate flush to ensure all audio is sent
-            flushAudioBuffer();
+          flushAudioBuffer();
+          if (isGreetingInProgress) {
+            isGreetingInProgress = false;
+            enableInterruptions();
+          }
             break;
+
+        case "response.cancelled":
+          console.log("Response cancelled", message);
+          if (isGreetingInProgress) {
+            isGreetingInProgress = false;
+            enableInterruptions();
+          }
+          break;
 
           case "response.function_call_arguments.done":
             console.log("Function call arguments streaming completed", message);
@@ -576,7 +608,11 @@ const handleClientConnection = (clientWs) => {
 
           case "input_audio_buffer.speech_started":
             console.log("Audio streaming started");
+          if (interruptsEnabled) {
             clientWs.send(JSON.stringify({ type: "interruption" }));
+          } else {
+            console.log("Ignoring interruption signal during greeting phase");
+          }
             break;
 
           case "conversation.item.input_audio_transcription.completed":
@@ -704,6 +740,8 @@ const handleClientConnection = (clientWs) => {
     }
 
     sessionToolHandlers = null;
+    interruptsEnabled = false;
+    isGreetingInProgress = false;
 
     // Reset session state but keep connections alive for reuse
     audioBuffer8k = [];
