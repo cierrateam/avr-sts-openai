@@ -9,7 +9,7 @@ echo "🐳 Building and pushing Docker image for avr-sts-openai..."
 
 # Get the version from package.json
 VERSION=$(node -p "require('./package.json').version")
-IMAGE_NAME="vittoriodev/avr-sts-openai"
+IMAGE_NAME="cierrateam/avr-sts-openai"
 
 echo "📦 Version: $VERSION"
 echo "🏷️  Image: $IMAGE_NAME"
