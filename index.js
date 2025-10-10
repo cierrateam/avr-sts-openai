@@ -47,7 +47,7 @@ const connectToOpenAI = () => {
 const fetchCallerInfo = async (sessionUuid) => {
   try {
     const amiUrl = process.env.AMI_URL || "http://127.0.0.1:6006";
-    const response = await axios.post(`${amiUrl}/caller-info`, {
+    const response = await axios.post(`${amiUrl}/variables`, {
       uuid: sessionUuid
     });
     

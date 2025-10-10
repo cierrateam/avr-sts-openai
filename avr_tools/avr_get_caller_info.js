@@ -43,7 +43,7 @@ module.exports = {
 
       // Fallback: try to get caller info from AMI
       const url = process.env.AMI_URL || "http://127.0.0.1:6006";
-      const res = await axios.post(`${url}/caller-info`, {
+      const res = await axios.post(`${url}/variables`, {
         uuid,
         info_type
       });
