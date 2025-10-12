@@ -47,17 +47,53 @@ function loadTools(apiTools = []) {
   // Helper function to load tools from a directory
   const loadToolsFromDir = (dirPath) => {
     if (!fs.existsSync(dirPath)) return [];
-    
-    return fs.readdirSync(dirPath)
-      .map(file => {
-        const tool = require(path.join(dirPath, file));
-        return {
+
+    const safeTools = [];
+
+    fs.readdirSync(dirPath).forEach(file => {
+      const filePath = path.join(dirPath, file);
+
+      try {
+        const stats = fs.statSync(filePath);
+        if (!stats.isFile()) {
+          console.warn(`Skipping non-file entry in ${dirPath}: ${file}`);
+          return;
+        }
+
+        if (path.extname(file) !== '.js') {
+          console.warn(`Skipping unsupported tool file type in ${dirPath}: ${file}`);
+          return;
+        }
+
+        try {
+          delete require.cache[require.resolve(filePath)];
+        } catch (err) {
+          // If resolve fails we still attempt regular require which will throw below
+        }
+
+        const tool = require(filePath);
+        if (!tool || !tool.name || typeof tool.name !== 'string') {
+          console.warn(`Invalid tool definition in ${filePath}: missing or invalid name`);
+          return;
+        }
+
+        if (!tool.handler || typeof tool.handler !== 'function') {
+          console.warn(`Invalid tool definition in ${filePath}: missing handler function`);
+          return;
+        }
+
+        safeTools.push({
           type: 'function',
           name: tool.name,
           description: tool.description || '',
           parameters: tool.input_schema || {},
-        };
-      });
+        });
+      } catch (err) {
+        console.error(`Failed to load tool ${filePath}: ${err.message}`);
+      }
+    });
+
+    return safeTools;
   };
 
   // Load tools from both directories
@@ -93,8 +129,22 @@ function getToolHandler(name, sessionToolHandlers = null) {
   
   // If local tool exists, return its handler
   if (toolPath) {
-    const tool = require(toolPath);
-    return tool.handler;
+    try {
+      try {
+        delete require.cache[require.resolve(toolPath)];
+      } catch (err) {
+        // Ignore cache clearing errors
+      }
+
+      const tool = require(toolPath);
+      if (!tool || typeof tool.handler !== 'function') {
+        throw new Error('missing handler function export');
+      }
+      return tool.handler;
+    } catch (err) {
+      console.error(`Failed to load handler for tool "${name}" from ${toolPath}: ${err.message}`);
+      throw err;
+    }
   }
 
   // Otherwise, check if it's an API-provided tool
