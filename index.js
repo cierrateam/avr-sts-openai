@@ -13,10 +13,6 @@
  */
 
 const WebSocket = require("ws");
-const { create } = require("@alexanderolsen/libsamplerate-js");
-const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
-const AgentApiClient = require("./apiClient");
-const axios = require("axios");
 const { pathToFileURL } = require("url");
 const fs = require("fs/promises");
 const normalizeFsPath = (value) => value.replace(/\\/g, '/');
@@ -40,6 +36,11 @@ globalThis.fetch = async (resource, init) => {
 
   return originalFetch(resource, init);
 };
+
+const { create } = require("@alexanderolsen/libsamplerate-js");
+const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
+const AgentApiClient = require("./apiClient");
+const axios = require("axios");
 
 const samplerateWasmSource = (() => {
   if (process.env.LIBSAMPLERATE_WASM) {
