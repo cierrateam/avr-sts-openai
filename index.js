@@ -29,17 +29,17 @@ const wasmFilePath = (() => {
 })();
 
 function resolveWasmPath() {
-  const base = wasmFilePath;
+  const target = wasmFilePath;
 
-  if (base.startsWith('http://') || base.startsWith('https://')) {
-    return base;
+  if (target.startsWith('http://') || target.startsWith('https://')) {
+    return target;
   }
 
-  if (base.startsWith('file://')) {
-    return base;
+  if (target.startsWith('file://')) {
+    return target.replace(/^file:\/\//, '');
   }
 
-  return `file://${base}`;
+  return target;
 }
 
 /**
