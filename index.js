@@ -17,10 +17,10 @@ const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
 const AgentApiClient = require("./apiClient");
 const axios = require("axios");
-
+const { pathToFileURL } = require("url");
 const normalizeFsPath = (value) => value.replace(/\\/g, '/');
 
-const samplerateWasmPath = (() => {
+const samplerateWasmSource = (() => {
   if (process.env.LIBSAMPLERATE_WASM) {
     return normalizeFsPath(process.env.LIBSAMPLERATE_WASM);
   }
@@ -31,15 +31,17 @@ const samplerateWasmPath = (() => {
 })();
 
 function resolveWasmPath() {
-  if (samplerateWasmPath.startsWith('http://') || samplerateWasmPath.startsWith('https://')) {
-    return samplerateWasmPath;
+  const target = samplerateWasmSource;
+
+  if (target.startsWith('http://') || target.startsWith('https://')) {
+    return target;
   }
 
-  if (samplerateWasmPath.startsWith('file://')) {
-    return samplerateWasmPath.replace(/^file:\/\//, '');
+  if (target.startsWith('file://')) {
+    return target;
   }
 
-  return samplerateWasmPath;
+  return pathToFileURL(target).href;
 }
 
 /**
