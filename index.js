@@ -13,29 +13,7 @@
  */
 
 const WebSocket = require("ws");
-const { pathToFileURL } = require("url");
-const fs = require("fs/promises");
 const normalizeFsPath = (value) => value.replace(/\\/g, '/');
-
-const originalFetch = globalThis.fetch;
-
-globalThis.fetch = async (resource, init) => {
-  const url = typeof resource === 'string' ? resource : resource?.url;
-
-  if (url && url.startsWith('file://')) {
-    const filePath = url.replace(/^file:\/\//, '');
-    const data = await fs.readFile(filePath);
-
-    return new Response(data, {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/wasm',
-      },
-    });
-  }
-
-  return originalFetch(resource, init);
-};
 
 const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
@@ -53,17 +31,7 @@ const samplerateWasmSource = (() => {
 })();
 
 function resolveWasmPath() {
-  const target = samplerateWasmSource;
-
-  if (target.startsWith('http://') || target.startsWith('https://')) {
-    return target;
-  }
-
-  if (target.startsWith('file://')) {
-    return target;
-  }
-
-  return pathToFileURL(target).href;
+  return samplerateWasmSource;
 }
 
 /**
