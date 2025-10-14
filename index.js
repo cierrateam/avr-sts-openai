@@ -20,6 +20,8 @@ const axios = require("axios");
 
 require("dotenv").config();
 
+const transferApiBaseUrl = (process.env.TRANSFER_API_BASE_URL || '').replace(/\/$/, '');
+
 /**
  * Creates and configures a WebSocket connection to OpenAI's real-time API.
  *
@@ -556,10 +558,51 @@ const handleClientConnection = (clientWs) => {
             }
 
             try {
-              // Execute the tool handler with the provided arguments and caller info
+              const args = JSON.parse(message.arguments);
+
+              if (message.name === 'avr_transfer') {
+                if (!transferApiBaseUrl) {
+                  throw new Error('TRANSFER_API_BASE_URL is not configured for transfer helper flow');
+                }
+
+                try {
+                  await axios.post(`${transferApiBaseUrl}/redirect`, {
+                    uuid: sessionUuid,
+                    exten: args.transfer_extension,
+                    context: args.transfer_context,
+                    priority: args.transfer_priority,
+                    agent_id: process.env.AGENT_ID,
+                    metadata: {
+                      transfer_context: args.transfer_context,
+                      transfer_priority: args.transfer_priority,
+                      transfer_reason: args.transfer_reason,
+                      caller_info: callerInfo,
+                    },
+                  }, {
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'X-AVR-UUID': sessionUuid,
+                    },
+                  });
+
+                  const toolResponsePayload = {
+                    type: "response.create",
+                    response: {
+                      instructions: "Ich leite den Anruf weiter. Bitte bleibe einen Moment in der Leitung.",
+                    },
+                  };
+                  lastSentOpenAIResponsePayload = toolResponsePayload;
+                  ws.send(JSON.stringify(toolResponsePayload));
+                } catch (error) {
+                  console.error('Failed to initiate transfer helper flow:', error.message);
+                  clientWs.send(JSON.stringify({ type: 'error', message: 'Transfer fehlgeschlagen.' }));
+                }
+                break;
+              }
+
               const content = await handler(
                 sessionUuid,
-                JSON.parse(message.arguments),
+                args,
                 callerInfo // Pass caller information to the tool handler
               );
               console.log("Tool response:", content);
