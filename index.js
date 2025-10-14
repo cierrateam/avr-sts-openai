@@ -17,7 +17,7 @@ const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
 const AgentApiClient = require("./apiClient");
 const axios = require("axios");
-const path = require("path");
+
 const normalizeFsPath = (value) => value.replace(/\\/g, '/');
 
 const samplerateWasmPath = (() => {
