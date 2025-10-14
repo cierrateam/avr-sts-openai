@@ -21,6 +21,27 @@ require("dotenv").config();
 
 const { create } = require("@alexanderolsen/libsamplerate-js");
 
+const stripTrailingSlash = (value) =>
+  typeof value === "string" ? value.replace(/\/+$/, "") : value;
+
+const transferApiBaseUrl = (() => {
+  const explicit =
+    stripTrailingSlash(process.env.TRANSFER_API_BASE_URL) ||
+    stripTrailingSlash(process.env.TRANSFER_API_BASE_URL_DEFAULT);
+
+  if (explicit) {
+    return explicit;
+  }
+
+  const appUrl = stripTrailingSlash(process.env.APP_URL);
+
+  if (appUrl) {
+    return `${appUrl}/api/transfer`;
+  }
+
+  return null;
+})();
+
 /**
  * Creates and configures a WebSocket connection to OpenAI's real-time API.
  *
