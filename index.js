@@ -17,23 +17,30 @@ const { create } = require("@alexanderolsen/libsamplerate-js");
 const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
 const AgentApiClient = require("./apiClient");
 const axios = require("axios");
+const path = require("path");
+const normalizeFsPath = (value) => value.replace(/\\/g, '/');
 
-require("dotenv").config();
-
-const transferApiBaseUrl = (process.env.TRANSFER_API_BASE_URL || '').replace(/\/$/, '');
-const wasmPath = (() => {
+const wasmFilePath = (() => {
   if (process.env.LIBSAMPLERATE_WASM) {
-    return process.env.LIBSAMPLERATE_WASM;
+    return normalizeFsPath(process.env.LIBSAMPLERATE_WASM);
   }
 
-  return `${__dirname}/libsamplerate.wasm`;
+  return normalizeFsPath(path.join(__dirname, 'libsamplerate.wasm'));
 })();
 
 function resolveWasmPath() {
-  return wasmPath;
-}
+  const base = wasmFilePath;
 
-const samplerateOptions = { wasmPath: resolveWasmPath(), converterType: 2 };
+  if (base.startsWith('http://') || base.startsWith('https://')) {
+    return base;
+  }
+
+  if (base.startsWith('file://')) {
+    return base;
+  }
+
+  return `file://${base}`;
+}
 
 /**
  * Creates and configures a WebSocket connection to OpenAI's real-time API.
