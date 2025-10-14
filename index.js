@@ -18,7 +18,6 @@ const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
 const AgentApiClient = require("./apiClient");
 const axios = require("axios");
 const path = require("path");
-const { pathToFileURL } = require("url");
 const normalizeFsPath = (value) => value.replace(/\\/g, '/');
 
 const wasmFilePath = (() => {
@@ -37,10 +36,10 @@ function resolveWasmPath() {
   }
 
   if (target.startsWith('file://')) {
-    return target;
+    return target.replace(/^file:\/\//, '');
   }
 
-  return pathToFileURL(target).href;
+  return target;
 }
 
 /**
