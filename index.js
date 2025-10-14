@@ -18,7 +18,28 @@ const { loadTools, getToolHandler, setApiTools } = require("./loadTools");
 const AgentApiClient = require("./apiClient");
 const axios = require("axios");
 const { pathToFileURL } = require("url");
+const fs = require("fs/promises");
 const normalizeFsPath = (value) => value.replace(/\\/g, '/');
+
+const originalFetch = globalThis.fetch;
+
+globalThis.fetch = async (resource, init) => {
+  const url = typeof resource === 'string' ? resource : resource?.url;
+
+  if (url && url.startsWith('file://')) {
+    const filePath = url.replace(/^file:\/\//, '');
+    const data = await fs.readFile(filePath);
+
+    return new Response(data, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/wasm',
+      },
+    });
+  }
+
+  return originalFetch(resource, init);
+};
 
 const samplerateWasmSource = (() => {
   if (process.env.LIBSAMPLERATE_WASM) {
