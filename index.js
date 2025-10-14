@@ -21,6 +21,19 @@ const axios = require("axios");
 require("dotenv").config();
 
 const transferApiBaseUrl = (process.env.TRANSFER_API_BASE_URL || '').replace(/\/$/, '');
+const wasmPath = (() => {
+  if (process.env.LIBSAMPLERATE_WASM) {
+    return process.env.LIBSAMPLERATE_WASM;
+  }
+
+  return `${__dirname}/libsamplerate.wasm`;
+})();
+
+function resolveWasmPath() {
+  return wasmPath;
+}
+
+const samplerateOptions = { wasmPath: resolveWasmPath(), converterType: 2 };
 
 /**
  * Creates and configures a WebSocket connection to OpenAI's real-time API.
@@ -336,8 +349,8 @@ const handleClientConnection = (clientWs) => {
       isGreetingInProgress = false;
 
       try {
-        downsampler = await create(1, 24000, 8000); // 1 channel, 24kHz to 8kHz
-        upsampler = await create(1, 8000, 24000); // 1 channel, 8kHz to 24kHz
+        downsampler = await create(1, 24000, 8000, { wasmPath: resolveWasmPath(), converterType: 2 });
+        upsampler = await create(1, 8000, 24000, { wasmPath: resolveWasmPath(), converterType: 2 });
         console.log(`Session ${sessionUuid}: Audio resamplers initialized`);
       } catch (error) {
         console.error(`Session ${sessionUuid}: Failed to initialize audio resamplers`, error);
