@@ -41,8 +41,8 @@ module.exports = {
         const res = await axios.post(`${transferApiBaseUrl}/redirect`, {
           uuid,
           exten: transfer_extension,
-          context: transfer_context,
-          priority: transfer_priority,
+          context: transfer_context || "incoming",
+          priority: transfer_priority || 1,
           metadata: {
             transfer_reason,
           },
@@ -60,7 +60,7 @@ module.exports = {
       const res = await axios.post(`${url}/transfer`, {
         uuid,
         exten: transfer_extension,
-        context: transfer_context || "demo",
+        context: transfer_context || "incoming",
         priority: transfer_priority || 1,
       });
       console.log("Transfer response (legacy):", res.data);
