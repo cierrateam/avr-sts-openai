@@ -77,6 +77,64 @@ The application includes two main audio processing functions:
    - Converts OpenAI's 24kHz output back to 8kHz
    - Ensures compatibility with client audio systems
 
+### Real-Time Barge-In Interruptions
+
+The system features **always-enabled real-time interruption handling** for natural, responsive conversations. When a user starts speaking or sends text while the AI is responding, the system:
+
+- **Immediately stops TTS playback** and clears audio buffers
+- **Cancels ongoing LLM generation** using OpenAI's `response.cancel` event
+- **Prevents overlapping speech** between AI and user
+- **Marks interrupted messages** with status flags for transparency
+- **Emits telemetry events** for monitoring and observability
+
+#### Key Features
+
+- **Always Enabled**: Interruptions work from the moment the session starts (including during greetings)
+- **Low Latency**: Target latency of ≤150ms for audio interrupts, ≤100ms for text interrupts
+- **Immediate Cancel Policy**: Stops both TTS and generation as soon as interruption is detected
+- **No Configuration Needed**: Works out of the box with best-practice defaults
+- **Server-Side VAD**: Uses OpenAI's Voice Activity Detection to trigger interruptions
+
+#### Telemetry Events
+
+The system emits structured telemetry events for observability:
+
+```json
+{
+  "event": "interrupt.started",
+  "sessionUuid": "...",
+  "timestamp": "2025-11-05T15:30:00.000Z",
+  "trigger": "user_audio",
+  "currentResponseId": "resp_abc123",
+  "wasAiSpeaking": true
+}
+```
+
+Events include:
+- `interrupt.started` - When interruption is detected
+- `generation.canceled` - When OpenAI response is cancelled
+- `tts.stopped` - When audio buffers are cleared
+- `interrupt.completed` - When interruption handling finishes (includes latency)
+
+#### Client Integration
+
+When an interruption occurs, clients receive:
+
+```json
+{
+  "type": "interruption",
+  "action": "clear_audio_buffers",
+  "timestamp": 1699200000000
+}
+```
+
+Clients should immediately:
+1. Stop playing any queued audio
+2. Clear local audio buffers
+3. Be ready for the next AI response
+
+See `.env.example` for detailed interruption configuration documentation.
+
 ## API Endpoints
 
 ### POST `/speech-to-speech-stream`

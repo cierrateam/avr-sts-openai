@@ -99,12 +99,10 @@ const handleClientConnection = (clientWs) => {
   let sessionUuid = null;
   let callerInfo = null; // Store caller information for the session
 
-  // Session-specific audio resamplers, tool handlers, and interruption state
+  // Session-specific audio resamplers, tool handlers, and response tracking
   let downsampler = null;
   let upsampler = null;
   let sessionToolHandlers = null;
-  let interruptsEnabled = false;
-  let isGreetingInProgress = false;
 
   let audioBuffer8k = [];
   let ws = null;
@@ -114,6 +112,11 @@ const handleClientConnection = (clientWs) => {
   // Track call metadata for summary
   let callStartTime = null;
   let transcripts = [];
+  
+  // Track current response for interruption handling
+  let currentResponseId = null;
+  let currentConversationItemId = null;
+  let isAiSpeaking = false;
 
   /**
    * Processes OpenAI audio chunks by downsampling and extracting frames.
@@ -154,11 +157,86 @@ const handleClientConnection = (clientWs) => {
     return audioFrames;
   }
 
-  function enableInterruptions() {
-    if (!interruptsEnabled) {
-      console.log("Enabling interruptions for session", sessionUuid);
-      interruptsEnabled = true;
+  /**
+   * Emits a telemetry event for observability and monitoring.
+   * 
+   * @param {string} eventType - Type of telemetry event (e.g., 'interrupt.started')
+   * @param {Object} metadata - Additional metadata for the event
+   */
+  function emitTelemetry(eventType, metadata = {}) {
+    const telemetryEvent = {
+      event: eventType,
+      sessionUuid: sessionUuid,
+      timestamp: new Date().toISOString(),
+      ...metadata
+    };
+    console.log('TELEMETRY:', JSON.stringify(telemetryEvent));
+  }
+  
+  /**
+   * Handles interruption when user starts speaking or sends text.
+   * Immediately cancels ongoing AI response and clears audio buffers.
+   * 
+   * @param {string} trigger - What triggered the interruption ('user_audio' or 'user_text')
+   */
+  function handleInterruption(trigger) {
+    const interruptStartTime = Date.now();
+    
+    emitTelemetry('interrupt.started', {
+      trigger: trigger,
+      currentResponseId: currentResponseId,
+      wasAiSpeaking: isAiSpeaking
+    });
+    
+    // Cancel ongoing OpenAI response if one exists
+    if (currentResponseId && ws && ws.readyState === WebSocket.OPEN) {
+      const cancelEvent = {
+        type: "response.cancel"
+      };
+      ws.send(JSON.stringify(cancelEvent));
+      
+      emitTelemetry('generation.canceled', {
+        responseId: currentResponseId,
+        reason: 'interrupted'
+      });
     }
+    
+    // Clear server-side audio buffers to stop TTS playback
+    const clearedBufferSize = audioBuffer8k.length;
+    audioBuffer8k = [];
+    
+    emitTelemetry('tts.stopped', {
+      reason: 'interrupted',
+      clearedBufferSize: clearedBufferSize
+    });
+    
+    // Notify client to clear its audio buffers immediately
+    if (clientWs && clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(JSON.stringify({
+        type: "interruption",
+        action: "clear_audio_buffers",
+        timestamp: Date.now()
+      }));
+    }
+    
+    // Mark the current transcript as interrupted if it exists
+    if (transcripts.length > 0 && transcripts[transcripts.length - 1].role === 'agent') {
+      transcripts[transcripts.length - 1].status = 'interrupted';
+      transcripts[transcripts.length - 1].interruptedAt = new Date().toISOString();
+    }
+    
+    // Reset response tracking
+    isAiSpeaking = false;
+    currentResponseId = null;
+    currentConversationItemId = null;
+    
+    const interruptLatency = Date.now() - interruptStartTime;
+    emitTelemetry('interrupt.completed', {
+      latencyMs: interruptLatency,
+      trigger: trigger
+    });
+    
+    console.log(`Interruption completed in ${interruptLatency}ms (trigger: ${trigger})`);
   }
 
   /**
@@ -352,9 +430,6 @@ const handleClientConnection = (clientWs) => {
       console.log("WebSocket connected to OpenAI");
       const apiClient = new AgentApiClient();
 
-      interruptsEnabled = false;
-      isGreetingInProgress = false;
-
       try {
         downsampler = await create(1, 24000, 8000);
         upsampler = await create(1, 8000, 24000);
@@ -372,6 +447,7 @@ const handleClientConnection = (clientWs) => {
       }
 
       // Initialize session with audio format specifications
+      // Interruptions are always enabled with best-practice defaults
       const obj = {
         type: "session.update",
         session: {
@@ -383,11 +459,13 @@ const handleClientConnection = (clientWs) => {
           output_audio_format: "pcm16",
           turn_detection: {
             type: "server_vad",
-            threshold: 0.7,
-            prefix_padding_ms: 300,
-            silence_duration_ms: 500,
-            create_response: true, // only in conversation mode
-            interrupt_response: false,
+            threshold: 0.7,             // VAD sensitivity (0.0-1.0)
+            prefix_padding_ms: 300,     // Audio before speech starts
+            silence_duration_ms: 500,   // Silence before turn ends
+            create_response: true,      // Auto-create response on user speech
+            // Note: We do NOT set interrupt_response to false. This allows the
+            // server VAD to trigger speech_started events that we use for
+            // real-time interruption handling.
           },
           instructions:
             "You are a helpful assistant that can answer questions and help with tasks. Please respond in German unless specifically asked to use another language.",
@@ -454,6 +532,7 @@ const handleClientConnection = (clientWs) => {
       ws.send(JSON.stringify(obj));
 
       // If a greeting is configured on the API, say it as the first utterance
+      // Note: Interruptions are now always enabled, even during greeting
       try {
         if (process.env.AGENT_ID && apiClient.isConfigured()) {
           console.log(`Fetching greeting for agent ${process.env.AGENT_ID}...`);
@@ -478,19 +557,15 @@ const handleClientConnection = (clientWs) => {
             };
             console.log("OpenAI payload (greeting) instructions type:", typeof greetingPayload.response.instructions);
             lastSentOpenAIResponsePayload = greetingPayload;
-            isGreetingInProgress = true;
             ws.send(JSON.stringify(greetingPayload));
           } else {
             console.log("No greeting text found or greeting is empty");
-            enableInterruptions();
           }
         } else {
           console.log("No AGENT_ID or API not configured, skipping greeting");
-          enableInterruptions();
         }
       } catch (error) {
         console.error("Failed to fetch or send greeting:", error.message);
-        enableInterruptions();
       }
     });
 
@@ -532,41 +607,55 @@ const handleClientConnection = (clientWs) => {
             });
             break;
 
+          case "response.created":
+            // Track the new response ID for interruption handling
+            if (message.response && message.response.id) {
+              currentResponseId = message.response.id;
+              isAiSpeaking = true;
+              console.log(`Response created with ID: ${currentResponseId}`);
+            }
+            break;
+
           case "response.audio_started":
             // New response started, ensure buffer is clean
             console.log("New audio response started, clearing buffer");
             audioBuffer8k = [];
+            isAiSpeaking = true;
             break;
 
           case "response.audio.done":
             // Flush any remaining audio when response audio is complete
             console.log("Response audio completed, flushing buffer");
-            // Immediate flush to ensure all audio is sent
-          flushAudioBuffer();
-          if (isGreetingInProgress) {
-            isGreetingInProgress = false;
-            enableInterruptions();
-          }
+            flushAudioBuffer();
             break;
 
           case "response.done":
             // Also flush on overall response completion
             console.log("Response completed, ensuring buffer is flushed");
-            // Immediate flush to ensure all audio is sent
-          flushAudioBuffer();
-          if (isGreetingInProgress) {
-            isGreetingInProgress = false;
-            enableInterruptions();
-          }
+            flushAudioBuffer();
+            
+            // Reset response tracking
+            currentResponseId = null;
+            currentConversationItemId = null;
+            isAiSpeaking = false;
             break;
 
-        case "response.cancelled":
-          console.log("Response cancelled", message);
-          if (isGreetingInProgress) {
-            isGreetingInProgress = false;
-            enableInterruptions();
-          }
-          break;
+          case "response.cancelled":
+            console.log("Response cancelled", message);
+            
+            // Reset response tracking
+            currentResponseId = null;
+            currentConversationItemId = null;
+            isAiSpeaking = false;
+            break;
+          
+          case "conversation.item.created":
+            // Track conversation item for potential interruption marking
+            if (message.item && message.item.id && message.item.role === "assistant") {
+              currentConversationItemId = message.item.id;
+              console.log(`Conversation item created: ${currentConversationItemId}`);
+            }
+            break;
 
           case "response.function_call_arguments.done":
             console.log("Function call arguments streaming completed", message);
@@ -670,12 +759,9 @@ const handleClientConnection = (clientWs) => {
             break;
 
           case "input_audio_buffer.speech_started":
-            console.log("Audio streaming started");
-          if (interruptsEnabled) {
-            clientWs.send(JSON.stringify({ type: "interruption" }));
-          } else {
-            console.log("Ignoring interruption signal during greeting phase");
-          }
+            console.log("User speech detected - triggering interruption");
+            // Real-time interruption: immediately cancel AI response and clear buffers
+            handleInterruption('user_audio');
             break;
 
           case "conversation.item.input_audio_transcription.completed":
@@ -803,8 +889,6 @@ const handleClientConnection = (clientWs) => {
     }
 
     sessionToolHandlers = null;
-    interruptsEnabled = false;
-    isGreetingInProgress = false;
 
     // Reset session state but keep connections alive for reuse
     audioBuffer8k = [];
@@ -813,6 +897,11 @@ const handleClientConnection = (clientWs) => {
     isInitialized = false;
     callStartTime = null;
     transcripts = [];
+    
+    // Reset response tracking
+    currentResponseId = null;
+    currentConversationItemId = null;
+    isAiSpeaking = false;
     
     // Only close OpenAI connection if it exists and is not already closed
     if (ws && ws.readyState === WebSocket.OPEN) {
